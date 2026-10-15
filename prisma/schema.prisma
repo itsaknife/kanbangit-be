@@ -1,0 +1,106 @@
+// Cấu trúc database của hệ thống.
+// Địa chỉ kết nối nằm trong prisma.config.ts (đọc từ biến DATABASE_URL), không viết ở đây.
+
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  moduleFormat        = "esm"
+  importFileExtension = "js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// Người dùng đăng nhập bằng GitHub. id chính là id tài khoản GitHub.
+model User {
+  id          Int      @id
+  login       String   @unique
+  name        String?
+  avatarUrl   String
+  /// Token GitHub đã mã hóa (AES-256-GCM), dùng để gọi GitHub thay mặt người dùng.
+  accessToken String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  connectedRepositories Repository[]
+  weeklySummaries       WeeklySummary[]
+}
+
+/// Repository đã được kết nối vào hệ thống. id chính là id repository trên GitHub.
+model Repository {
+  id            Int      @id
+  name          String
+  owner         String
+  fullName      String   @unique
+  description   String?
+  isPrivate     Boolean
+  /// Id webhook đã đăng ký trên GitHub (để biết đã đăng ký chưa).
+  webhookId     BigInt?
+  connectedById Int
+  connectedBy   User     @relation(fields: [connectedById], references: [id])
+  connectedAt   DateTime @default(now())
+
+  issues          Issue[]
+  weeklySummaries WeeklySummary[]
+}
+
+enum IssueState {
+  open
+  closed
+}
+
+/// Cột trên bảng Kanban. Trên GitHub: done = issue đã đóng, in_progress = đang mở + nhãn "in progress".
+enum IssueStatus {
+  todo
+  in_progress
+  done
+}
+
+/// Bản sao issue từ GitHub. GitHub vẫn là nguồn gốc, bảng này để xem nhanh, thống kê và tìm issue trùng.
+model Issue {
+  id           Int         @id @default(autoincrement())
+  githubId     BigInt
+  repoId       Int
+  repository   Repository  @relation(fields: [repoId], references: [id], onDelete: Cascade)
+  number       Int
+  title        String
+  body         String?
+  state        IssueState
+  status       IssueStatus
+  /// Mảng { name, color }. Không chứa nhãn trạng thái "in progress".
+  labels       Json        @default("[]")
+  /// Mảng { login, avatarUrl }.
+  assignees    Json        @default("[]")
+  authorLogin  String?
+  authorAvatar String?
+  htmlUrl      String
+  /// Thời điểm cập nhật cuối theo GitHub, dùng để bỏ qua webhook trùng với thay đổi do chính app gây ra.
+  githubUpdatedAt DateTime
+  githubCreatedAt DateTime
+  closedAt     DateTime?
+  /// Vector ý nghĩa của issue (768 chiều) để tìm issue gần giống. Tạo cột bằng Prisma, chỉ đọc/ghi bằng SQL thô.
+  embedding    Unsupported("vector(768)")?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  @@unique([repoId, number])
+  @@unique([githubId])
+  @@index([repoId, status])
+  @@index([repoId, closedAt])
+}
+
+/// Báo cáo tiến độ tuần do LLM viết.
+model WeeklySummary {
+  id          Int        @id @default(autoincrement())
+  repoId      Int
+  repository  Repository @relation(fields: [repoId], references: [id], onDelete: Cascade)
+  weekStart   String     // yyyy-MM-dd (thứ Hai)
+  weekEnd     String     // yyyy-MM-dd (Chủ nhật)
+  content     String
+  createdById Int
+  createdBy   User       @relation(fields: [createdById], references: [id])
+  createdAt   DateTime   @default(now())
+
+  @@index([repoId, createdAt])
+}

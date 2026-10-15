@@ -1,14 +1,3 @@
-node_modules
-dist
-.env
-.env.*
-!.env.example
-src/generated
-coverage
-*.log
-.DS_Store
-
-
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
 # dependencies
@@ -20,6 +9,7 @@ coverage
 !.yarn/plugins
 !.yarn/releases
 !.yarn/versions
+
 
 # testing
 /coverage
@@ -55,3 +45,6 @@ next-env.d.ts
 
 *.md
 
+build
+dist
+generated

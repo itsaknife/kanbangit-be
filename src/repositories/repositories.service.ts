@@ -27,7 +27,7 @@ export class RepositoriesService {
     private readonly github: GithubService,
     private readonly access: AccessService,
     private readonly issues: IssuesService,
-  ) {}
+  ) { }
 
   /** Repository của người dùng trên GitHub, kèm đã kết nối hay chưa và người dùng có phải owner không. */
   async list(user: User): Promise<RepositoryDto[]> {
@@ -39,6 +39,12 @@ export class RepositoriesService {
   async get(user: User, repoId: number): Promise<RepositoryDto> {
     const { github } = await this.access.requireAccess(user, repoId);
     return this.toDto(github, await this.countOpenIssues([repoId]));
+  }
+
+  /** Danh sách người có thể được giao issue (để chọn assignee trong form). */
+  async listAssignees(user: User, repoId: number) {
+    const { connected } = await this.access.requireMember(user, repoId);
+    return this.github.listAssignees(user, connected.owner, connected.name);
   }
 
   /**

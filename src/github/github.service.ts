@@ -15,7 +15,7 @@ export class GithubService {
   private readonly logger = new Logger(GithubService.name);
   private readonly repoCache = new Map<number, { expiresAt: number; repos: GithubRepo[] }>();
 
-  constructor(private readonly config: ConfigService<Env, true>) {}
+  constructor(private readonly config: ConfigService<Env, true>) { }
 
   client(user: Pick<User, 'accessToken'>): Octokit {
     const key = this.config.get('TOKEN_ENCRYPTION_KEY', { infer: true });
@@ -91,6 +91,21 @@ export class GithubService {
       ...payload,
     });
     return data;
+  }
+
+  /** Những người có thể được giao issue trong repository (chủ repo và các collaborator). */
+  async listAssignees(
+    user: User,
+    owner: string,
+    repo: string,
+  ): Promise<Array<{ login: string; avatarUrl: string }>> {
+    const octokit = this.client(user);
+    const users = await octokit.paginate(octokit.rest.issues.listAssignees, {
+      owner,
+      repo,
+      per_page: 100,
+    });
+    return users.map((u) => ({ login: u.login, avatarUrl: u.avatar_url }));
   }
 
   /** Tạo các nhãn chuẩn (bug, enhancement, task) và nhãn "in progress" nếu repository chưa có. */

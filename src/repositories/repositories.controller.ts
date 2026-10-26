@@ -7,7 +7,7 @@ import { RepositoriesService } from './repositories.service.js';
 @Controller('repositories')
 @UseGuards(JwtAuthGuard)
 export class RepositoriesController {
-  constructor(private readonly repositories: RepositoriesService) {}
+  constructor(private readonly repositories: RepositoriesService) { }
 
   @Get()
   list(@CurrentUser() user: User) {
@@ -17,6 +17,11 @@ export class RepositoriesController {
   @Get(':repoId')
   get(@CurrentUser() user: User, @Param('repoId', ParseIntPipe) repoId: number) {
     return this.repositories.get(user, repoId);
+  }
+
+  @Get(':repoId/assignees')
+  assignees(@CurrentUser() user: User, @Param('repoId', ParseIntPipe) repoId: number) {
+    return this.repositories.listAssignees(user, repoId);
   }
 
   @Post(':repoId/connect')

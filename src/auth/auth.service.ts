@@ -14,7 +14,7 @@ export class AuthService {
   constructor(
     private readonly config: ConfigService<Env, true>,
     private readonly prisma: PrismaService,
-  ) {}
+  ) { }
 
   buildAuthorizeUrl(state: string): string {
     const params = new URLSearchParams({
@@ -22,6 +22,7 @@ export class AuthService {
       redirect_uri: `${this.config.get('API_URL', { infer: true })}/auth/github/callback`,
       scope: OAUTH_SCOPE,
       state,
+      prompt: 'select_account',
     });
     return `https://github.com/login/oauth/authorize?${params.toString()}`;
   }

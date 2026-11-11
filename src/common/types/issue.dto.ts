@@ -13,4 +13,5 @@ export interface IssueDto {
   createdAt: string;
   updatedAt: string;
   closedAt: string | null;
+  dueDate: string | null;
 }

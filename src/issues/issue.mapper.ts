@@ -110,5 +110,6 @@ export function toIssueDto(issue: Issue): IssueDto {
     createdAt: issue.githubCreatedAt.toISOString(),
     updatedAt: issue.githubUpdatedAt.toISOString(),
     closedAt: issue.closedAt?.toISOString() ?? null,
+    dueDate: issue.dueDate?.toISOString() ?? null,
   };
 }

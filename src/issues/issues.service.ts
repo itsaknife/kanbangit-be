@@ -52,8 +52,14 @@ export class IssuesService {
 
   async create(user: User, repoId: number, dto: CreateIssueDto): Promise<IssueDto> {
     const { connected } = await this.access.requireMember(user, repoId);
-    const created = await this.github.createIssue(user, connected.owner, connected.name, dto);
-    return this.saveAndBroadcast(repoId, created);
+    const { dueDate, ...githubPayload } = dto;
+    const created = await this.github.createIssue(
+      user,
+      connected.owner,
+      connected.name,
+      githubPayload,
+    );
+    return this.saveAndBroadcast(repoId, created, dueDate);
   }
 
   async update(user: User, repoId: number, number: number, dto: UpdateIssueDto): Promise<IssueDto> {
@@ -71,7 +77,7 @@ export class IssuesService {
       labels,
       assignees: dto.assignees,
     });
-    return this.saveAndBroadcast(repoId, updated);
+    return this.saveAndBroadcast(repoId, updated, dto.dueDate);
   }
 
   /** Kéo thẻ sang cột khác: cập nhật nhãn/trạng thái (mở hoặc đóng) của issue trên GitHub. */
@@ -131,8 +137,12 @@ export class IssuesService {
   }
 
   /** Lưu issue từ GitHub và báo cho các trình duyệt đang mở. Bỏ qua nếu dữ liệu không đổi. */
-  private async saveAndBroadcast(repoId: number, gh: GithubIssue): Promise<IssueDto> {
-    const result = await this.upsertFromGithub(repoId, gh);
+  private async saveAndBroadcast(
+    repoId: number,
+    gh: GithubIssue,
+    dueDate?: string | null,
+  ): Promise<IssueDto> {
+    const result = await this.upsertFromGithub(repoId, gh, dueDate);
     if (result.textChanged) this.embeddings.queueRepo(repoId);
 
     const dto = toIssueDto(result.issue);
@@ -146,7 +156,11 @@ export class IssuesService {
    * - Bản cũ hơn bản đang lưu (webhook đến muộn) thì bỏ qua.
    * - Cùng nội dung (ví dụ webhook dội lại thay đổi do chính app vừa làm) thì không báo lại, tránh vòng lặp đồng bộ.
    */
-  private async upsertFromGithub(repoId: number, gh: GithubIssue): Promise<UpsertResult> {
+  private async upsertFromGithub(
+    repoId: number,
+    gh: GithubIssue,
+    dueDate?: string | null,
+  ): Promise<UpsertResult> {
     const fields = toIssueFields(gh);
     const existing = await this.prisma.issue.findUnique({
       where: { repoId_number: { repoId, number: fields.number } },
@@ -165,14 +179,21 @@ export class IssuesService {
           assignees: assigneesOf(existing),
           closedAt: existing.closedAt,
         });
-      if (isStale || isSame)
+      const dueDateChanged =
+        dueDate !== undefined &&
+        (existing.dueDate?.getTime() ?? null) !==
+          (dueDate === null ? null : new Date(dueDate).getTime());
+      if (isStale || (isSame && !dueDateChanged))
         return { issue: existing, created: false, changed: false, textChanged: false };
     }
 
     const issue = await this.prisma.issue.upsert({
       where: { repoId_number: { repoId, number: fields.number } },
-      create: { repoId, ...fields },
-      update: fields,
+      create: { repoId, ...fields, dueDate: dueDate ? new Date(dueDate) : null },
+      update: {
+        ...fields,
+        ...(dueDate !== undefined && { dueDate: dueDate ? new Date(dueDate) : null }),
+      },
     });
     const textChanged = !existing || existing.title !== issue.title || existing.body !== issue.body;
     if (existing && textChanged) await this.embeddings.invalidate(issue.id);

@@ -1,4 +1,4 @@
-import { IsArray, IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsArray, IsDateString, IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
 
 export class UpdateIssueDto {
   @IsOptional()
@@ -21,4 +21,9 @@ export class UpdateIssueDto {
   @IsArray()
   @IsString({ each: true })
   assignees?: string[];
+
+  /** Hạn hoàn thành nội bộ của Kanbangit, không đồng bộ sang GitHub. */
+  @IsOptional()
+  @IsDateString()
+  dueDate?: string | null;
 }

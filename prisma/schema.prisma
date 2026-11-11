@@ -79,6 +79,8 @@ model Issue {
   githubUpdatedAt DateTime
   githubCreatedAt DateTime
   closedAt     DateTime?
+  /// Hạn hoàn thành do Kanbangit quản lý; GitHub Issues không có trường tương ứng.
+  dueDate      DateTime?
   /// Vector ý nghĩa của issue (768 chiều) để tìm issue gần giống. Tạo cột bằng Prisma, chỉ đọc/ghi bằng SQL thô.
   embedding    Unsupported("vector(768)")?
   createdAt    DateTime    @default(now())
@@ -88,6 +90,7 @@ model Issue {
   @@unique([githubId])
   @@index([repoId, status])
   @@index([repoId, closedAt])
+  @@index([repoId, dueDate])
 }
 
 /// Báo cáo tiến độ tuần do LLM viết.

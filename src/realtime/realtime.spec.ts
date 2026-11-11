@@ -24,6 +24,7 @@ const issue: IssueDto = {
   createdAt: '2026-10-01T00:00:00.000Z',
   updatedAt: '2026-10-01T00:00:00.000Z',
   closedAt: null,
+  dueDate: null,
 };
 
 const user = { id: 1, login: 'huy' };

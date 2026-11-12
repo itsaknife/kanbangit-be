@@ -5,7 +5,7 @@ import type { Env } from '../config/env.js';
 import { IN_PROGRESS_LABEL_DEFINITION, STANDARD_LABELS } from '../common/constants/issues.js';
 import { decrypt } from '../common/utils/crypto.js';
 import type { User } from '../generated/prisma/client.js';
-import type { GithubIssue, GithubRepo } from './github.types.js';
+import type { GithubIssue, GithubRepo, GithubMember } from './github.types.js';
 
 const REPO_CACHE_MS = 60_000;
 
@@ -13,9 +13,9 @@ const REPO_CACHE_MS = 60_000;
 @Injectable()
 export class GithubService {
   private readonly logger = new Logger(GithubService.name);
-  private readonly repoCache = new Map<number, { expiresAt: number; repos: GithubRepo[] }>();
+  private readonly repoCache = new Map<string, { expiresAt: number; repos: GithubRepo[] }>();
 
-  constructor(private readonly config: ConfigService<Env, true>) { }
+  constructor(private readonly config: ConfigService<Env, true>) {}
 
   client(user: Pick<User, 'accessToken'>): Octokit {
     const key = this.config.get('TOKEN_ENCRYPTION_KEY', { infer: true });
@@ -43,9 +43,74 @@ export class GithubService {
       isPrivate: repo.private,
       openIssuesCount: repo.open_issues_count ?? 0,
       canManage: repo.permissions?.admin ?? false,
+      ownerType: repo.owner.type,
     }));
     this.repoCache.set(user.id, { expiresAt: Date.now() + REPO_CACHE_MS, repos });
     return repos;
+  }
+
+  async createPersonalRepo(
+    user: User,
+    input: { name: string; description?: string; visibility: 'PUBLIC' | 'PRIVATE' },
+  ): Promise<GithubRepo> {
+    const { data } = await this.client(user).rest.repos.createForAuthenticatedUser({
+      name: input.name,
+      description: input.description,
+      private: input.visibility === 'PRIVATE',
+      has_issues: true,
+    });
+    this.repoCache.delete(user.id);
+    return {
+      id: data.id,
+      name: data.name,
+      owner: data.owner.login,
+      fullName: data.full_name,
+      description: data.description,
+      isPrivate: data.private,
+      openIssuesCount: data.open_issues_count,
+      canManage: true,
+      ownerType: data.owner.type,
+    };
+  }
+
+  async listMembers(user: User, owner: string, repo: string): Promise<GithubMember[]> {
+    const octokit = this.client(user);
+    const [collaborators, ownerResponse] = await Promise.all([
+      octokit.paginate(octokit.rest.repos.listCollaborators, {
+        owner,
+        repo,
+        affiliation: 'all',
+        per_page: 100,
+      }),
+      octokit.rest.users.getByUsername({ username: owner }),
+    ]);
+    const members: GithubMember[] = collaborators.map((member) => ({
+      githubUserId: BigInt(member.id),
+      login: member.login,
+      avatarUrl: member.avatar_url,
+      githubPermission: member.permissions?.admin
+        ? 'ADMIN'
+        : member.permissions?.maintain
+          ? 'MAINTAIN'
+          : member.permissions?.push
+            ? 'WRITE'
+            : member.permissions?.triage
+              ? 'TRIAGE'
+              : member.permissions?.pull
+                ? 'READ'
+                : 'UNKNOWN',
+    }));
+    const account = ownerResponse.data;
+    const ownerMember: GithubMember = {
+      githubUserId: BigInt(account.id),
+      login: account.login,
+      avatarUrl: account.avatar_url,
+      githubPermission: 'ADMIN',
+    };
+    return [
+      ...members.filter((member) => member.githubUserId !== ownerMember.githubUserId),
+      ownerMember,
+    ];
   }
 
   /** Toàn bộ issue (đang mở và đã đóng) của repository, không gồm Pull Request. */

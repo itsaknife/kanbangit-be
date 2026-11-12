@@ -1,4 +1,19 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  ParseIntPipe,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
+import { IsOptional, IsString, MaxLength } from 'class-validator';
+class IssueSearchQuery {
+  @IsOptional() @IsString() @MaxLength(200) search?: string;
+}
 import { CurrentUser } from '../common/decorators/current-user.decorator.js';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard.js';
 import type { User } from '../generated/prisma/client.js';
@@ -13,14 +28,18 @@ export class IssuesController {
   constructor(private readonly issues: IssuesService) {}
 
   @Get()
-  list(@CurrentUser() user: User, @Param('repoId', ParseIntPipe) repoId: number) {
-    return this.issues.list(user, repoId);
+  list(
+    @CurrentUser() user: User,
+    @Param('repoId', ParseUUIDPipe) repoId: string,
+    @Query() query: IssueSearchQuery,
+  ) {
+    return this.issues.list(user, repoId, query.search);
   }
 
   @Get(':number')
   get(
     @CurrentUser() user: User,
-    @Param('repoId', ParseIntPipe) repoId: number,
+    @Param('repoId', ParseUUIDPipe) repoId: string,
     @Param('number', ParseIntPipe) number: number,
   ) {
     return this.issues.get(user, repoId, number);
@@ -29,7 +48,7 @@ export class IssuesController {
   @Post()
   create(
     @CurrentUser() user: User,
-    @Param('repoId', ParseIntPipe) repoId: number,
+    @Param('repoId', ParseUUIDPipe) repoId: string,
     @Body() dto: CreateIssueDto,
   ) {
     return this.issues.create(user, repoId, dto);
@@ -38,7 +57,7 @@ export class IssuesController {
   @Patch(':number')
   update(
     @CurrentUser() user: User,
-    @Param('repoId', ParseIntPipe) repoId: number,
+    @Param('repoId', ParseUUIDPipe) repoId: string,
     @Param('number', ParseIntPipe) number: number,
     @Body() dto: UpdateIssueDto,
   ) {
@@ -48,7 +67,7 @@ export class IssuesController {
   @Patch(':number/status')
   updateStatus(
     @CurrentUser() user: User,
-    @Param('repoId', ParseIntPipe) repoId: number,
+    @Param('repoId', ParseUUIDPipe) repoId: string,
     @Param('number', ParseIntPipe) number: number,
     @Body() dto: UpdateStatusDto,
   ) {

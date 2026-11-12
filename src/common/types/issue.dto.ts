@@ -1,6 +1,8 @@
 /** Hình dạng issue mà backend trả cho frontend (khớp với src/types/issue.types.ts bên frontend). */
 export interface IssueDto {
-  id: number;
+  id: string;
+  trackerId: string;
+  issueCode: string;
   number: number;
   title: string;
   body: string | null;
@@ -13,4 +15,5 @@ export interface IssueDto {
   createdAt: string;
   updatedAt: string;
   closedAt: string | null;
+  dueDate: string | null;
 }

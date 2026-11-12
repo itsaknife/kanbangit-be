@@ -14,7 +14,9 @@ datasource db {
 
 /// Người dùng đăng nhập bằng GitHub. id chính là id tài khoản GitHub.
 model User {
-  id          Int      @id
+  id          String   @id @default(uuid())
+  legacyId    Int?     @unique
+  githubId    BigInt   @unique
   login       String   @unique
   name        String?
   avatarUrl   String
@@ -25,11 +27,14 @@ model User {
 
   connectedRepositories Repository[]
   weeklySummaries       WeeklySummary[]
+  memberships           RepositoryMember[]
 }
 
 /// Repository đã được kết nối vào hệ thống. id chính là id repository trên GitHub.
 model Repository {
-  id            Int      @id
+  id            String   @id @default(uuid())
+  legacyId      Int?     @unique
+  githubId      BigInt   @unique
   name          String
   owner         String
   fullName      String   @unique
@@ -37,12 +42,80 @@ model Repository {
   isPrivate     Boolean
   /// Id webhook đã đăng ký trên GitHub (để biết đã đăng ký chưa).
   webhookId     BigInt?
-  connectedById Int
+  connectedById String
   connectedBy   User     @relation(fields: [connectedById], references: [id])
   connectedAt   DateTime @default(now())
+  importCompleted Boolean @default(false)
 
   issues          Issue[]
   weeklySummaries WeeklySummary[]
+  members         RepositoryMember[]
+  trackers        Tracker[]
+  trackerPrefixes TrackerPrefix[]
+}
+
+enum RepositoryRole {
+  OWNER
+  MEMBER
+}
+
+enum GithubPermission {
+  ADMIN
+  MAINTAIN
+  WRITE
+  TRIAGE
+  READ
+  UNKNOWN
+}
+
+model RepositoryMember {
+  id               String @id @default(uuid())
+  repositoryId     String
+  repository       Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  githubUserId     BigInt
+  login            String
+  avatarUrl        String?
+  githubPermission GithubPermission @default(UNKNOWN)
+  userId           String?
+  user             User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+  role             RepositoryRole @default(MEMBER)
+  isActive         Boolean @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([repositoryId, githubUserId])
+  @@index([userId])
+}
+
+model Tracker {
+  id           String @id @default(uuid())
+  repositoryId String
+  repository   Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  name         String
+  prefix       String
+  color        String
+  isActive     Boolean @default(true)
+  displayOrder Int @default(0)
+  nextSequence Int @default(1)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  issues       Issue[]
+  prefixes     TrackerPrefix[]
+
+  @@unique([id, repositoryId])
+  @@unique([repositoryId, name])
+  @@unique([repositoryId, prefix])
+}
+
+model TrackerPrefix {
+  id           String @id @default(uuid())
+  repositoryId String
+  repository   Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  trackerId    String
+  tracker      Tracker @relation(fields: [trackerId], references: [id], onDelete: Cascade)
+  prefix       String
+
+  @@unique([repositoryId, prefix])
 }
 
 enum IssueState {
@@ -59,11 +132,15 @@ enum IssueStatus {
 
 /// Bản sao issue từ GitHub. GitHub vẫn là nguồn gốc, bảng này để xem nhanh, thống kê và tìm issue trùng.
 model Issue {
-  id           Int         @id @default(autoincrement())
+  id           String      @id @default(uuid())
+  legacyId     Int?        @unique
   githubId     BigInt
-  repoId       Int
+  repoId       String
   repository   Repository  @relation(fields: [repoId], references: [id], onDelete: Cascade)
   number       Int
+  issueCode    String
+  trackerId    String
+  tracker      Tracker @relation(fields: [trackerId, repoId], references: [id, repositoryId], onDelete: Restrict)
   title        String
   body         String?
   state        IssueState
@@ -79,26 +156,32 @@ model Issue {
   githubUpdatedAt DateTime
   githubCreatedAt DateTime
   closedAt     DateTime?
+  /// Hạn hoàn thành do Kanbangit quản lý; GitHub Issues không có trường tương ứng.
+  dueDate      DateTime?
   /// Vector ý nghĩa của issue (768 chiều) để tìm issue gần giống. Tạo cột bằng Prisma, chỉ đọc/ghi bằng SQL thô.
   embedding    Unsupported("vector(768)")?
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
 
   @@unique([repoId, number])
+  @@unique([repoId, issueCode])
+  @@index([repoId, trackerId])
   @@unique([githubId])
   @@index([repoId, status])
   @@index([repoId, closedAt])
+  @@index([repoId, dueDate])
 }
 
 /// Báo cáo tiến độ tuần do LLM viết.
 model WeeklySummary {
-  id          Int        @id @default(autoincrement())
-  repoId      Int
+  id          String     @id @default(uuid())
+  legacyId    Int?       @unique
+  repoId      String
   repository  Repository @relation(fields: [repoId], references: [id], onDelete: Cascade)
   weekStart   String     // yyyy-MM-dd (thứ Hai)
   weekEnd     String     // yyyy-MM-dd (Chủ nhật)
   content     String
-  createdById Int
+  createdById String
   createdBy   User       @relation(fields: [createdById], references: [id])
   createdAt   DateTime   @default(now())
 

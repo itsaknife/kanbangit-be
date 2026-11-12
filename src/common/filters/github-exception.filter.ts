@@ -13,7 +13,11 @@ export function translateGithubError(error: RequestError): { status: number; mes
     case 403:
       return /rate limit/i.test(detail)
         ? { status: 429, message: 'Đã vượt giới hạn gọi GitHub, hãy thử lại sau ít phút' }
-        : { status: 403, message: `GitHub từ chối thao tác này: ${detail}` };
+        : {
+            status: 403,
+            message:
+              'GitHub từ chối thao tác. Hãy kiểm tra quyền repository và đăng nhập lại để cấp quyền repo.',
+          };
     case 404:
       return {
         status: 404,
@@ -34,7 +38,7 @@ export class GithubExceptionFilter implements ExceptionFilter {
 
   catch(error: RequestError, host: ArgumentsHost): void {
     const { status, message } = translateGithubError(error);
-    this.logger.warn(`GitHub trả lỗi ${error.status}: ${error.message}`);
+    this.logger.warn(`GitHub trả lỗi ${error.status}`);
     host
       .switchToHttp()
       .getResponse<Response>()

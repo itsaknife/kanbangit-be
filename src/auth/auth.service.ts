@@ -14,7 +14,7 @@ export class AuthService {
   constructor(
     private readonly config: ConfigService<Env, true>,
     private readonly prisma: PrismaService,
-  ) { }
+  ) {}
 
   buildAuthorizeUrl(state: string): string {
     const params = new URLSearchParams({
@@ -42,16 +42,24 @@ export class AuthService {
       avatarUrl: data.avatar_url,
       accessToken: encrypted,
     };
-    return this.prisma.user.upsert({
-      where: { id: data.id },
-      create: { id: data.id, ...fields },
-      update: fields,
+    return this.prisma.$transaction(async (tx) => {
+      const user = await tx.user.upsert({
+        where: { githubId: BigInt(data.id) },
+        create: { githubId: BigInt(data.id), ...fields },
+        update: fields,
+      });
+      await tx.repositoryMember.updateMany({
+        where: { githubUserId: BigInt(data.id) },
+        data: { userId: user.id },
+      });
+      return user;
     });
   }
 
   private async exchangeCode(code: string): Promise<string> {
     const response = await fetch('https://github.com/login/oauth/access_token', {
       method: 'POST',
+      signal: AbortSignal.timeout(15000),
       headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
       body: JSON.stringify({
         client_id: this.config.get('GITHUB_CLIENT_ID', { infer: true }),

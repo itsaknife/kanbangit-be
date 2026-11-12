@@ -1,6 +1,16 @@
-import { IsArray, IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
+import {
+  IsUUID,
+  IsArray,
+  IsDateString,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  MaxLength,
+} from 'class-validator';
 
 export class CreateIssueDto {
+  @IsUUID()
+  trackerId!: string;
   @IsString()
   @IsNotEmpty()
   @MaxLength(256)
@@ -21,4 +31,9 @@ export class CreateIssueDto {
   @IsArray()
   @IsString({ each: true })
   assignees?: string[];
+
+  /** Hạn hoàn thành nội bộ của Kanbangit, không đồng bộ sang GitHub. */
+  @IsOptional()
+  @IsDateString()
+  dueDate?: string | null;
 }

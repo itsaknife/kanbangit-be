@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
 import { CurrentUser } from '../common/decorators/current-user.decorator.js';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard.js';
 import type { User } from '../generated/prisma/client.js';
@@ -16,14 +24,14 @@ export class AiController {
   ) {}
 
   @Get('weekly-summary')
-  getWeeklySummary(@CurrentUser() user: User, @Param('repoId', ParseIntPipe) repoId: number) {
+  getWeeklySummary(@CurrentUser() user: User, @Param('repoId', ParseUUIDPipe) repoId: string) {
     return this.weeklySummary.getLatest(user, repoId);
   }
 
   @Post('weekly-summary')
   generateWeeklySummary(
     @CurrentUser() user: User,
-    @Param('repoId', ParseIntPipe) repoId: number,
+    @Param('repoId', ParseUUIDPipe) repoId: string,
     @Body() dto: GenerateSummaryDto,
   ) {
     return this.weeklySummary.generate(user, repoId, dto.weekStart);
@@ -32,7 +40,7 @@ export class AiController {
   @Post('duplicate-check')
   checkDuplicate(
     @CurrentUser() user: User,
-    @Param('repoId', ParseIntPipe) repoId: number,
+    @Param('repoId', ParseUUIDPipe) repoId: string,
     @Body() dto: DuplicateCheckDto,
   ) {
     return this.duplicates.check(user, repoId, dto);

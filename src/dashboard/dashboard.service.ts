@@ -33,7 +33,7 @@ export class DashboardService {
     private readonly config: ConfigService<Env, true>,
   ) {}
 
-  async getStats(user: User, repoId: number, weekStart?: string): Promise<DashboardStatsDto> {
+  async getStats(user: User, repoId: string, weekStart?: string): Promise<DashboardStatsDto> {
     await this.access.requireMember(user, repoId);
 
     const offset = this.config.get('TZ_OFFSET_MINUTES', { infer: true });

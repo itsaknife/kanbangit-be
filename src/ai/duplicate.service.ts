@@ -64,7 +64,7 @@ export class DuplicateService {
     private readonly config: ConfigService<Env, true>,
   ) {}
 
-  async check(user: User, repoId: number, dto: DuplicateCheckDto): Promise<DuplicateCheckResult> {
+  async check(user: User, repoId: string, dto: DuplicateCheckDto): Promise<DuplicateCheckResult> {
     await this.access.requireMember(user, repoId);
 
     // Bước 1: tìm ứng viên bằng vector

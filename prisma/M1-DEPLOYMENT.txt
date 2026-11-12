@@ -1,0 +1,67 @@
+M1 GitHub Integration deployment
+
+DEPLOYED 2026-11-11 18:10 Asia/Ho_Chi_Minh:
+202611110002_github_integration applied successfully to configured application DB.
+Existing baseline history was verified against the local baseline checksum/schema.
+All legacy rows compared equal to pre-migration backup (1 User, 1 Repository,
+6 Issues, 0 WeeklySummary). Backfilled 6 Trackers and 1 active Owner membership.
+Workspace backup: .migration-backups/m1-before-1794395393225.json
+Receipt: .migration-backups/m1-deployment-receipt.json
+Paths are relative to workspace root, outside both Git repositories.
+The backup includes application data and encrypted tokens; keep it private.
+Post-migration client regeneration was not completed: during this operation,
+local Prisma dependencies/package manifests changed externally from Prisma 7.10
+to Prisma CLI 8.0.0-rc.33. Existing generated M1 client was left untouched rather
+than generating with a newly changed release candidate toolchain.
+
+The following original instructions describe the pre-deployment procedure.
+
+Source includes two migrations:
+  202611110001_legacy_baseline
+  202611110002_github_integration
+
+Both have been tested using real PostgreSQL + pgvector in an isolated schema,
+with synthetic legacy data and full ROLLBACK. This does not deploy the changes
+to application tables. No application database migration has been applied.
+
+Existing database with legacy tables but no _prisma_migrations:
+1. Take a verified backup and rehearse restore into a separate database.
+2. Compare the restored legacy schema with the baseline, including dueDate,
+   constraints, pgvector extension and its schema/search_path.
+3. Only when equivalent, mark baseline applied on that target:
+     npx prisma migrate resolve --applied 202611110001_legacy_baseline
+4. Deploy the additive M1 migration:
+     npx prisma migrate deploy
+5. Generate client and deploy BE/FE together. Log in as the personal repo owner
+   and sync members to enrich legacy users and collaborators from GitHub.
+
+Empty database:
+  npx prisma migrate deploy
+  npm run db:generate
+
+Do not reset a populated database or execute baseline CREATE TABLE statements
+on existing application tables. User/Repository/Issue numeric IDs and existing
+API prefix/response shapes are retained in this transitional M1 release.
+RepositoryMember and Tracker internal IDs are UUID strings. Full UUID cutover,
+API envelope/prefix transition and Issue tracker/code behavior are later work.
+
+Backfill creates six trackers per existing repo and local membership only for
+the known connector and any known personal owner. It does not invent GitHub IDs
+for assignees based on login. If the personal owner has never logged in, they
+must log in before taking ownership actions and synchronizing members.
+
+Creation uses POST /user/repos only. If GitHub creation succeeds but import
+fails, API returns REPOSITORY_IMPORT_FAILED and repositoryId. Refresh discovery
+and retry POST /repositories/:repoId/connect; do not create the repo again.
+
+Read-only/local verification commands:
+  npm run typecheck
+  npm run lint
+  npm test
+  npm run build
+  node scripts/verify-m1-migrations.mjs
+
+The last command connects to configured PostgreSQL, runs both migrations and
+synthetic fixtures in a fresh schema inside a transaction, then rolls back.
+It needs CREATE SCHEMA permission and the vector extension already installed.
+It never runs the destructive integration suite against the application DB.

@@ -11,7 +11,9 @@ import { CorsIoAdapter } from './cors-io.adapter.js';
 import { RealtimeGateway } from './realtime.gateway.js';
 
 const issue: IssueDto = {
-  id: 1,
+  id: 'issue-uuid',
+  trackerId: 'tracker-uuid',
+  issueCode: 'TASK-001',
   number: 5,
   title: 'Lỗi',
   body: null,
@@ -48,8 +50,9 @@ describe('RealtimeGateway', () => {
         {
           provide: AccessService,
           useValue: {
-            requireMember: vi.fn(async (_u: unknown, repoId: number) => {
-              if (repoId !== 100) throw new Error('không có quyền');
+            requireMember: vi.fn(async (_u: unknown, repoId: string) => {
+              if (repoId !== '10000000-0000-4000-8000-000000000100')
+                throw new Error('không có quyền');
             }),
           },
         },
@@ -92,16 +95,16 @@ describe('RealtimeGateway', () => {
   it('thành viên vào phòng repo thì nhận được issue mới, đổi, xóa', async () => {
     const socket = open('session=valid');
     await once(socket, 'connect');
-    socket.emit(SOCKET_EVENTS.subscribeRepo, 100);
+    socket.emit(SOCKET_EVENTS.subscribeRepo, '10000000-0000-4000-8000-000000000100');
     await wait(100);
 
-    const created = once<{ repoId: number; issue: IssueDto }>(socket, SOCKET_EVENTS.issueCreated);
-    gateway.emitIssueCreated(100, issue);
-    expect(await created).toEqual({ repoId: 100, issue });
+    const created = once<{ repoId: string; issue: IssueDto }>(socket, SOCKET_EVENTS.issueCreated);
+    gateway.emitIssueCreated('10000000-0000-4000-8000-000000000100', issue);
+    expect(await created).toEqual({ repoId: '10000000-0000-4000-8000-000000000100', issue });
 
     const deleted = once(socket, SOCKET_EVENTS.issueDeleted);
-    gateway.emitIssueDeleted(100, 5);
-    expect(await deleted).toEqual({ repoId: 100, number: 5 });
+    gateway.emitIssueDeleted('10000000-0000-4000-8000-000000000100', 5);
+    expect(await deleted).toEqual({ repoId: '10000000-0000-4000-8000-000000000100', number: 5 });
   });
 
   it('không nhận dữ liệu của repo mình không có quyền, và ngừng nhận sau khi rời phòng', async () => {
@@ -110,15 +113,15 @@ describe('RealtimeGateway', () => {
     const received = vi.fn();
     socket.on(SOCKET_EVENTS.issueUpdated, received);
 
-    socket.emit(SOCKET_EVENTS.subscribeRepo, 999); // không có quyền
+    socket.emit(SOCKET_EVENTS.subscribeRepo, '10000000-0000-4000-8000-000000000999'); // không có quyền
     await wait(100);
-    gateway.emitIssueUpdated(999, issue);
+    gateway.emitIssueUpdated('10000000-0000-4000-8000-000000000999', issue);
 
-    socket.emit(SOCKET_EVENTS.subscribeRepo, 100);
+    socket.emit(SOCKET_EVENTS.subscribeRepo, '10000000-0000-4000-8000-000000000100');
     await wait(100);
-    socket.emit(SOCKET_EVENTS.unsubscribeRepo, 100); // rời phòng
+    socket.emit(SOCKET_EVENTS.unsubscribeRepo, '10000000-0000-4000-8000-000000000100'); // rời phòng
     await wait(100);
-    gateway.emitIssueUpdated(100, issue);
+    gateway.emitIssueUpdated('10000000-0000-4000-8000-000000000100', issue);
 
     await wait(150);
     expect(received).not.toHaveBeenCalled();

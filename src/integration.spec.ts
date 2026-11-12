@@ -48,6 +48,7 @@ const owner: GithubRepo = {
   canManage: true,
 };
 
+let repoId = '10000000-0000-4000-8000-000000000100';
 const NOW = new Date();
 const iso = (daysAgo: number) => new Date(NOW.getTime() - daysAgo * 86_400_000).toISOString();
 
@@ -116,6 +117,14 @@ describe.skipIf(!DB_URL)('tích hợp với database thật', () => {
   const github = {
     listRepos: vi.fn(async () => [owner]),
     listIssues: vi.fn(async () => githubIssues),
+    listMembers: vi.fn(async () => [
+      {
+        githubUserId: 1n,
+        login: 'huy',
+        avatarUrl: 'https://a/huy.png',
+        githubPermission: 'ADMIN' as const,
+      },
+    ]),
     ensureLabels: vi.fn(async () => undefined),
     ensureWebhook: vi.fn(async () => 777),
     createIssue: vi.fn(),
@@ -130,6 +139,7 @@ describe.skipIf(!DB_URL)('tích hợp với database thật', () => {
     ),
   };
   const realtime = {
+    refreshRepoAccess: vi.fn(),
     emitIssueCreated: vi.fn(),
     emitIssueUpdated: vi.fn(),
     emitIssueDeleted: vi.fn(),
@@ -164,14 +174,15 @@ describe.skipIf(!DB_URL)('tích hợp với database thật', () => {
     await prisma.user.deleteMany();
     await prisma.user.create({
       data: {
-        id: 1,
+        id: '10000000-0000-4000-8000-000000000001',
+        githubId: 1n,
         login: 'huy',
         name: 'Huy',
         avatarUrl: 'https://a/huy.png',
         accessToken: encrypt('gho_fake', process.env.TOKEN_ENCRYPTION_KEY!),
       },
     });
-    cookie = `session=${await app.get(SessionService).sign(1)}`;
+    cookie = `session=${await app.get(SessionService).sign('10000000-0000-4000-8000-000000000001')}`;
   });
 
   afterAll(async () => {
@@ -187,29 +198,30 @@ describe.skipIf(!DB_URL)('tích hợp với database thật', () => {
   });
 
   it('chưa kết nối thì không xem được issue', async () => {
-    expect((await api().get('/repositories/100/issues')).status).toBe(400);
+    expect((await api().get(`/repositories/${repoId}/issues`)).status).toBe(404);
   });
 
   it('owner kết nối repo: lưu repo, tạo nhãn, đăng ký webhook, lấy issue có sẵn', async () => {
-    const res = await api().post('/repositories/100/connect');
+    const res = await api().post('/repositories/import', { githubId: '100' });
+    repoId = res.body.id;
     expect(res.status).toBe(201);
     expect(res.body).toMatchObject({
-      id: 100,
+      id: repoId,
       isConnected: true,
       openIssuesCount: 2,
       canManage: true,
     });
     expect(github.ensureLabels).toHaveBeenCalledOnce();
     expect(github.ensureWebhook).toHaveBeenCalledOnce();
-    expect((await prisma.repository.findUnique({ where: { id: 100 } }))?.webhookId).toBe(777n);
+    expect((await prisma.repository.findUnique({ where: { id: repoId } }))?.webhookId).toBe(777n);
 
     // kết nối lại không làm trùng issue
-    await api().post('/repositories/100/connect');
-    expect(await prisma.issue.count({ where: { repoId: 100 } })).toBe(3);
+    await api().post(`/repositories/${repoId}/connect`);
+    expect(await prisma.issue.count({ where: { repoId } })).toBe(3);
   });
 
   it('danh sách issue: đúng cột Kanban, nhãn trạng thái được ẩn khỏi danh sách nhãn', async () => {
-    const res = await api().get('/repositories/100/issues');
+    const res = await api().get(`/repositories/${repoId}/issues`);
     expect(res.status).toBe(200);
     expect(res.body.map((i: { number: number }) => i.number)).toEqual([3, 2, 1]);
     const byNumber = Object.fromEntries(res.body.map((i: { number: number }) => [i.number, i]));
@@ -238,7 +250,7 @@ describe.skipIf(!DB_URL)('tích hợp với database thật', () => {
         { issueNumber: 999, reason: 'Issue không tồn tại' },
       ],
     });
-    const res = await api().post('/repositories/100/ai/duplicate-check', {
+    const res = await api().post(`/repositories/${repoId}/ai/duplicate-check`, {
       title: 'Lỗi không đăng nhập được GitHub',
       body: 'Bấm đăng nhập GitHub thì báo lỗi',
     });
@@ -261,13 +273,15 @@ describe.skipIf(!DB_URL)('tích hợp với database thật', () => {
 
   it('phát hiện trùng: nội dung không liên quan thì không gọi LLM', async () => {
     gemini.generateJson.mockClear();
-    const res = await api().post('/repositories/100/ai/duplicate-check', { title: 'zzz qqq xxx' });
+    const res = await api().post(`/repositories/${repoId}/ai/duplicate-check`, {
+      title: 'zzz qqq xxx',
+    });
     expect(res.body).toEqual({ isDuplicate: false, candidates: [] });
     expect(gemini.generateJson).not.toHaveBeenCalled();
   });
 
   it('dashboard: tổng quan, khối lượng từng thành viên, số issue xong trong tuần', async () => {
-    const res = await api().get('/repositories/100/dashboard');
+    const res = await api().get(`/repositories/${repoId}/dashboard`);
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ totalIssues: 3, todo: 1, inProgress: 1, done: 1 });
     expect(res.body.dailyClosed).toHaveLength(7);
@@ -277,7 +291,7 @@ describe.skipIf(!DB_URL)('tích hợp với database thật', () => {
         { login: 'lan', avatarUrl: 'https://a/lan.png', todo: 0, inProgress: 1, done: 0 },
       ]),
     );
-    expect((await api().get('/repositories/100/dashboard?weekStart=abc')).status).toBe(400);
+    expect((await api().get(`/repositories/${repoId}/dashboard?weekStart=abc`)).status).toBe(400);
   });
 
   it('kéo thẻ sang Đang làm: gửi nhãn "in progress" lên GitHub, lưu và báo realtime', async () => {
@@ -288,7 +302,9 @@ describe.skipIf(!DB_URL)('tích hợp với database thật', () => {
         labels: (payload.labels as string[]).map((name) => ({ name, color: 'ededed' })),
       }),
     );
-    const res = await api().patch('/repositories/100/issues/1/status', { status: 'in_progress' });
+    const res = await api().patch(`/repositories/${repoId}/issues/1/status`, {
+      status: 'in_progress',
+    });
     expect(res.status).toBe(200);
     expect(github.updateIssue.mock.calls[0]?.[4]).toMatchObject({
       state: 'open',
@@ -308,7 +324,7 @@ describe.skipIf(!DB_URL)('tích hợp với database thật', () => {
         labels: (payload.labels as string[]).map((name) => ({ name, color: 'ededed' })),
       }),
     );
-    const res = await api().patch('/repositories/100/issues/2/status', { status: 'done' });
+    const res = await api().patch(`/repositories/${repoId}/issues/2/status`, { status: 'done' });
     expect(github.updateIssue.mock.calls.at(-1)?.[4]).toMatchObject({
       state: 'closed',
       state_reason: 'completed',
@@ -325,7 +341,7 @@ describe.skipIf(!DB_URL)('tích hợp với database thật', () => {
         updated_at: new Date().toISOString(),
       }),
     );
-    const res = await api().patch('/repositories/100/issues/3', {
+    const res = await api().patch(`/repositories/${repoId}/issues/3`, {
       title: 'Avatar bị méo khi tải ảnh lớn',
     });
     expect(res.body.title).toBe('Avatar bị méo khi tải ảnh lớn');
@@ -341,7 +357,10 @@ describe.skipIf(!DB_URL)('tích hợp với database thật', () => {
     github.createIssue.mockResolvedValueOnce(
       makeIssue(4, 'Issue mới', { labels: [{ name: 'task', color: '0e8a16' }] }),
     );
-    const res = await api().post('/repositories/100/issues', {
+    const res = await api().post(`/repositories/${repoId}/issues`, {
+      trackerId: (
+        await prisma.tracker.findFirstOrThrow({ where: { repositoryId: repoId, isActive: true } })
+      ).id,
       title: 'Issue mới',
       labels: ['task'],
     });
@@ -351,8 +370,8 @@ describe.skipIf(!DB_URL)('tích hợp với database thật', () => {
   });
 
   it('báo cáo tuần: owner tạo được, lưu lại và đọc được báo cáo gần nhất', async () => {
-    expect((await api().get('/repositories/100/ai/weekly-summary')).status).toBe(404);
-    const created = await api().post('/repositories/100/ai/weekly-summary', {});
+    expect((await api().get(`/repositories/${repoId}/ai/weekly-summary`)).status).toBe(404);
+    const created = await api().post(`/repositories/${repoId}/ai/weekly-summary`, {});
     expect(created.status).toBe(201);
     expect(created.body.content).toBe('Tuần này nhóm hoàn thành 1 issue.');
     // dữ liệu thật của repo được đưa vào câu lệnh gửi LLM
@@ -360,7 +379,7 @@ describe.skipIf(!DB_URL)('tích hợp với database thật', () => {
     expect(prompt).toContain('Issue đã hoàn thành trong tuần');
     expect(prompt).toContain('#3');
     expect(prompt).toContain('#2');
-    const latest = await api().get('/repositories/100/ai/weekly-summary');
+    const latest = await api().get(`/repositories/${repoId}/ai/weekly-summary`);
     expect(latest.body.id).toBe(created.body.id);
   });
 });

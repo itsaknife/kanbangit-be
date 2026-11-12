@@ -15,7 +15,7 @@ import { GeminiService } from './gemini.service.js';
 const MAX_LISTED_ISSUES = 30;
 
 export interface WeeklySummaryDto {
-  id: number;
+  id: string;
   weekStart: string;
   weekEnd: string;
   content: string;
@@ -63,7 +63,7 @@ export class WeeklySummaryService {
   ) {}
 
   /** Báo cáo gần nhất của repository (mọi thành viên đều đọc được). */
-  async getLatest(user: User, repoId: number): Promise<WeeklySummaryDto> {
+  async getLatest(user: User, repoId: string): Promise<WeeklySummaryDto> {
     await this.access.requireMember(user, repoId);
     const latest = await this.prisma.weeklySummary.findFirst({
       where: { repoId },
@@ -74,7 +74,7 @@ export class WeeklySummaryService {
   }
 
   /** Tạo báo cáo mới bằng LLM. Chỉ owner được bấm, để tiết kiệm lượt gọi của gói miễn phí. */
-  async generate(user: User, repoId: number, weekStart?: string): Promise<WeeklySummaryDto> {
+  async generate(user: User, repoId: string, weekStart?: string): Promise<WeeklySummaryDto> {
     await this.access.requireConnectedOwner(user, repoId);
 
     let range;

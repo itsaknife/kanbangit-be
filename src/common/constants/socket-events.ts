@@ -7,4 +7,4 @@ export const SOCKET_EVENTS = {
   issueDeleted: 'issue:deleted',
 } as const;
 
-export const repoRoom = (repoId: number) => `repo:${repoId}`;
+export const repoRoom = (repoId: string) => `repo:${repoId}`;

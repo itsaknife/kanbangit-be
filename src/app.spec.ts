@@ -34,7 +34,8 @@ const { WEBHOOK_SECRET, ENCRYPTION_KEY } = vi.hoisted(() => {
 });
 
 const user = {
-  id: 1,
+  id: '10000000-0000-4000-8000-000000000001',
+  githubId: 1n,
   login: 'huy',
   name: 'Huy',
   avatarUrl: 'https://a/huy.png',
@@ -55,16 +56,58 @@ const repoAsMember: GithubRepo = {
 /** Database giả lưu trong bộ nhớ, đủ cho các thao tác mà test cần. */
 function createFakePrisma() {
   const issues = new Map<string, Record<string, any>>();
-  const key = (repoId: number, number: number) => `${repoId}#${number}`;
-  return {
+  const key = (repoId: string, number: number) => `${repoId}#${number}`;
+  const db = {
     user: { findUnique: vi.fn(async () => user) },
+    repositoryMember: {
+      findUnique: vi.fn(async () => ({ role: 'MEMBER', isActive: true, userId: user.id })),
+      findMany: vi.fn(async () => [
+        {
+          id: 'member-id',
+          githubUserId: 2n,
+          login: 'guest',
+          userId: null,
+          role: 'MEMBER',
+          isActive: true,
+        },
+      ]),
+    },
     repository: {
       findUnique: vi.fn(async ({ where }: any) =>
-        where.id === 100 ? { id: 100, owner: 'huy', name: 'app', fullName: 'huy/app' } : null,
+        where.id === '10000000-0000-4000-8000-000000000100' || where.githubId === 100n
+          ? {
+              id: '10000000-0000-4000-8000-000000000100',
+              githubId: 100n,
+              owner: 'huy',
+              name: 'app',
+              fullName: 'huy/app',
+              importCompleted: true,
+              isPrivate: false,
+              description: null,
+            }
+          : null,
       ),
-      findMany: vi.fn(async () => [{ id: 100 }]),
+      findMany: vi.fn(async () => [{ id: '10000000-0000-4000-8000-000000000100' }]),
+    },
+    tracker: {
+      findFirst: vi.fn(async () => ({ id: 'tracker', prefix: 'TASK', nextSequence: 1 })),
+      updateMany: vi.fn(async () => ({ count: 1 })),
+      findUniqueOrThrow: vi.fn(async () => ({ id: 'tracker', prefix: 'TASK', nextSequence: 2 })),
     },
     issue: {
+      count: vi.fn(async () => 2),
+      create: vi.fn(async ({ data }: any) => {
+        const saved = { id: 'issue-id', ...data };
+        issues.set(key(data.repoId, data.number), saved);
+        return saved;
+      }),
+      update: vi.fn(async ({ where, data }: any) => {
+        const old = [...issues.values()].find((i) => i.id === where.id);
+        if (!old) throw new Error('missing issue');
+        const saved = { ...old, ...data };
+        issues.set(key(saved.repoId, saved.number), saved);
+        return saved;
+      }),
       findUnique: vi.fn(
         async ({ where }: any) =>
           issues.get(key(where.repoId_number.repoId, where.repoId_number.number)) ?? null,
@@ -83,6 +126,7 @@ function createFakePrisma() {
     $executeRaw: vi.fn(async () => 1),
     $queryRaw: vi.fn(async () => []),
   };
+  return { ...db, $transaction: vi.fn(async (fn: (tx: typeof db) => unknown) => fn(db)) };
 }
 
 function githubIssue(overrides: Record<string, unknown> = {}) {
@@ -153,7 +197,7 @@ describe('ứng dụng', () => {
       const res = await request(app.getHttpServer()).get('/auth/me').set('Cookie', cookie);
       expect(res.status).toBe(200);
       expect(res.body).toEqual({
-        id: 1,
+        id: '10000000-0000-4000-8000-000000000001',
         login: 'huy',
         name: 'Huy',
         avatarUrl: 'https://a/huy.png',
@@ -178,11 +222,47 @@ describe('ứng dụng', () => {
   });
 
   describe('phân quyền owner', () => {
+    it('lists members with string GitHub IDs and supports not-yet-registered users', async () => {
+      const response = await request(app.getHttpServer())
+        .get('/repositories/10000000-0000-4000-8000-000000000100/members')
+        .set('Cookie', cookie);
+      expect(response.status).toBe(200);
+      expect(response.body[0]).toMatchObject({ githubUserId: '2', login: 'guest', userId: null });
+      expect(response.body[0]).not.toHaveProperty('accessToken');
+    });
+    it('requires authentication for repository creation', async () => {
+      expect(
+        (
+          await request(app.getHttpServer())
+            .post('/repositories')
+            .send({ name: 'demo', visibility: 'PUBLIC' })
+        ).status,
+      ).toBe(401);
+    });
+    it('validates create payload before invoking GitHub', async () => {
+      expect(
+        (
+          await request(app.getHttpServer())
+            .post('/repositories')
+            .set('Cookie', cookie)
+            .send({ name: '../bad', visibility: 'ORGANIZATION' })
+        ).status,
+      ).toBe(400);
+    });
+    it('denies member sync for non-owner', async () => {
+      expect(
+        (
+          await request(app.getHttpServer())
+            .post('/repositories/10000000-0000-4000-8000-000000000100/members/sync')
+            .set('Cookie', cookie)
+        ).status,
+      ).toBe(403);
+    });
     it('danh sách repo cho biết người dùng có phải owner không', async () => {
       const res = await request(app.getHttpServer()).get('/repositories').set('Cookie', cookie);
       expect(res.status).toBe(200);
       expect(res.body[0]).toMatchObject({
-        id: 100,
+        id: '10000000-0000-4000-8000-000000000100',
         isConnected: true,
         openIssuesCount: 2,
         canManage: false,
@@ -191,14 +271,14 @@ describe('ứng dụng', () => {
 
     it('thành viên thường không được kết nối repo', async () => {
       const res = await request(app.getHttpServer())
-        .post('/repositories/100/connect')
+        .post('/repositories/10000000-0000-4000-8000-000000000100/connect')
         .set('Cookie', cookie);
       expect(res.status).toBe(403);
     });
 
     it('thành viên thường không được tạo báo cáo AI', async () => {
       const res = await request(app.getHttpServer())
-        .post('/repositories/100/ai/weekly-summary')
+        .post('/repositories/10000000-0000-4000-8000-000000000100/ai/weekly-summary')
         .set('Cookie', cookie)
         .send({});
       expect(res.status).toBe(403);
@@ -206,7 +286,7 @@ describe('ứng dụng', () => {
 
     it('không thấy repo của người khác', async () => {
       const res = await request(app.getHttpServer())
-        .get('/repositories/999/issues')
+        .get('/repositories/10000000-0000-4000-8000-000000000999/issues')
         .set('Cookie', cookie);
       expect(res.status).toBe(404);
     });
@@ -221,14 +301,18 @@ describe('ứng dụng', () => {
 
     it('token GitHub hết hạn thì trả 401 với thông báo dễ hiểu (không phải 500)', async () => {
       github.listRepos.mockRejectedValueOnce(githubError(401, 'Bad credentials'));
-      const res = await request(app.getHttpServer()).get('/repositories').set('Cookie', cookie);
+      const res = await request(app.getHttpServer())
+        .get('/repositories/available')
+        .set('Cookie', cookie);
       expect(res.status).toBe(401);
       expect(res.body.message).toContain('đăng nhập lại');
     });
 
     it('hết giới hạn gọi GitHub thì trả 429', async () => {
       github.listRepos.mockRejectedValueOnce(githubError(403, 'API rate limit exceeded'));
-      const res = await request(app.getHttpServer()).get('/repositories').set('Cookie', cookie);
+      const res = await request(app.getHttpServer())
+        .get('/repositories/available')
+        .set('Cookie', cookie);
       expect(res.status).toBe(429);
     });
   });
@@ -236,7 +320,7 @@ describe('ứng dụng', () => {
   describe('kiểm tra dữ liệu gửi lên', () => {
     it('từ chối tiêu đề rỗng khi tạo issue', async () => {
       const res = await request(app.getHttpServer())
-        .post('/repositories/100/issues')
+        .post('/repositories/10000000-0000-4000-8000-000000000100/issues')
         .set('Cookie', cookie)
         .send({ title: '' });
       expect(res.status).toBe(400);
@@ -244,7 +328,7 @@ describe('ứng dụng', () => {
 
     it('từ chối trạng thái không hợp lệ khi kéo thẻ', async () => {
       const res = await request(app.getHttpServer())
-        .patch('/repositories/100/issues/5/status')
+        .patch('/repositories/10000000-0000-4000-8000-000000000100/issues/5/status')
         .set('Cookie', cookie)
         .send({ status: 'xong' });
       expect(res.status).toBe(400);
@@ -309,7 +393,10 @@ describe('ứng dụng', () => {
 
     it('xóa issue: báo realtime', async () => {
       await post('issues', { action: 'deleted', issue: githubIssue(), repository: { id: 100 } });
-      expect(realtime.emitIssueDeleted).toHaveBeenCalledWith(100, 5);
+      expect(realtime.emitIssueDeleted).toHaveBeenCalledWith(
+        '10000000-0000-4000-8000-000000000100',
+        5,
+      );
     });
 
     it('bỏ qua repository chưa kết nối', async () => {

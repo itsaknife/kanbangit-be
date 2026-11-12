@@ -9,6 +9,14 @@ export interface GithubRepo {
   openIssuesCount: number;
   /** Có quyền admin trên repository này (tức là "owner" theo cách hiểu của hệ thống). */
   canManage: boolean;
+  ownerType?: string;
+}
+
+export interface GithubMember {
+  githubUserId: bigint;
+  login: string;
+  avatarUrl: string;
+  githubPermission: 'ADMIN' | 'MAINTAIN' | 'WRITE' | 'TRIAGE' | 'READ' | 'UNKNOWN';
 }
 
 /** Phần dữ liệu issue của GitHub mà hệ thống dùng (từ REST API và từ webhook). */

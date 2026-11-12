@@ -1,6 +1,18 @@
-import { IsArray, IsDateString, IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
+import {
+  IsUUID,
+  ValidateIf,
+  IsArray,
+  IsDateString,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  MaxLength,
+} from 'class-validator';
 
 export class UpdateIssueDto {
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsUUID()
+  trackerId?: string;
   @IsOptional()
   @IsString()
   @IsNotEmpty()

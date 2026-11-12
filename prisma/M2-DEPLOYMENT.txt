@@ -1,0 +1,73 @@
+M2 Core Data & Permission -- deployed migration
+
+Migration: 202611110003_core_data_permission
+Status: deployed to the configured application database on 2026-11-11.
+Prisma migrate deploy reported all migrations successfully applied.
+The user explicitly requested direct deployment without further tests or rehearsal.
+The checklist below remains deployment guidance, not a record of completed steps.
+
+Scope:
+- UUID PKs for User/Repository/Issue/WeeklySummary and UUID FK mappings.
+- Numeric legacyId columns retained; GitHub User/Repository IDs in separate BigInt columns.
+- Existing Issue GitHub IDs/numbers, text, labels, assignees, dates, vectors preserved.
+- Existing issues assigned to Task tracker and given deterministic codes.
+- TrackerPrefix reserves historical prefixes; Issue Code immutable database trigger.
+- Composite Issue/Tracker FK prevents cross-repository Tracker assignment.
+- Partial unique index allows at most one active Owner per repository.
+
+Compatible ORM CLI:
+The installed Prisma platform CLI is 8 RC, but @prisma/client is 7.10.1.
+db:* scripts explicitly use npm exec --package=prisma@7.10.1.
+No user dependency versions were changed by M2. prisma.config.ts exports a plain
+configuration object accepted by the compatible ORM CLI.
+
+Before application deployment:
+1. Stop application writes/imports and webhook consumption for the cutover.
+2. Back up and restore the six M1 application tables into a separate database.
+   Include migration history and pgvector; keep backup data private.
+3. Check M1 migration history/checksums, Task tracker presence in every repository,
+   positive counters, and no repository with more than one active Owner.
+4. Rehearse the M2 migration on that restored database and compare rows using
+   retained legacyId and GitHub IDs, FK mappings, vector dimensions/content,
+   dates, issue code uniqueness and tracker counters. Do not reset a populated DB.
+5. Run npm run db:migrate, then npm run db:generate.
+6. Deploy FE and BE together; all repository IDs, socket rooms and JWT subjects
+   are now UUID strings. Users must sign in again; numeric JWTs are rejected.
+7. Open repositories through the refreshed list. Old numeric repository links
+   need their new UUID from the Repository legacyId/githubId mapping.
+8. Resume webhook consumption and verify fresh session, import, membership,
+   tracker management and issue creation/edit flows.
+
+Contract changes:
+- GET /repositories lists connected local repositories accessible by membership.
+- GET /repositories/available discovers not-yet-imported GitHub personal repositories.
+- POST /repositories/import accepts {githubId: decimal string} and returns UUID repo.
+- POST /repositories/:repoId/connect reimports an existing UUID repository.
+- PATCH /repositories/:repoId/owner accepts {memberId: UUID}.
+- Tracker APIs are under /repositories/:repoId/trackers.
+- Create Issue requires trackerId; response adds issueCode and trackerId.
+- Existing issue-number routes/statuses and GitHub-first issue writes stay in
+  place until M3/M5. Existing response envelopes/prefix stay consistent with M1.
+
+Verification:
+  npm run db:validate
+  npm run typecheck
+  npm run lint
+  npm test
+  npm run build
+
+Explicit opt-in real PostgreSQL tests (PowerShell, dedicated ephemeral schema):
+  $env:RUN_M2_DB_TESTS='1'
+  npm test -- src/trackers/core-data.integration.spec.ts
+  Remove-Item Env:RUN_M2_DB_TESTS
+
+The test only creates synthetic rows in m2_test_<random UUID>; application public
+tables are not read or changed. Its schema is removed after the test, including
+after transaction failure. The legacy integration.spec.ts suite still requires
+TEST_DATABASE_URL for a separate disposable database; never point it at production.
+
+Rollback:
+Before accepting UUID writes, restore the verified backup and old FE/BE together
+if the rehearsal/cutover fails. Once new writes use UUIDs or Issue Codes, prefer
+fix-forward; reverting to numeric IDs would need explicit reconciliation of new
+rows and external GitHub effects. Do not drop legacy mappings in this milestone.

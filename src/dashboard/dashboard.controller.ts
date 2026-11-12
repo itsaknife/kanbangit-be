@@ -1,4 +1,11 @@
-import { Controller, Get, Param, ParseIntPipe, Query, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { CurrentUser } from '../common/decorators/current-user.decorator.js';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard.js';
 import type { User } from '../generated/prisma/client.js';
@@ -12,7 +19,7 @@ export class DashboardController {
   @Get()
   getStats(
     @CurrentUser() user: User,
-    @Param('repoId', ParseIntPipe) repoId: number,
+    @Param('repoId', ParseUUIDPipe) repoId: string,
     @Query('weekStart') weekStart?: string,
   ) {
     return this.dashboard.getStats(user, repoId, weekStart);

@@ -56,7 +56,7 @@ export class RealtimeGateway implements OnGatewayInit {
     @ConnectedSocket() client: Socket,
     @MessageBody() repoId: unknown,
   ): Promise<void> {
-    if (typeof repoId !== 'number') return;
+    if (typeof repoId !== 'string' || !/^[0-9a-f-]{36}$/i.test(repoId)) return;
     try {
       await this.access.requireMember(client.data.user as User, repoId);
       await client.join(repoRoom(repoId));
@@ -70,19 +70,32 @@ export class RealtimeGateway implements OnGatewayInit {
     @ConnectedSocket() client: Socket,
     @MessageBody() repoId: unknown,
   ): Promise<void> {
-    if (typeof repoId !== 'number') return;
+    if (typeof repoId !== 'string') return;
     await client.leave(repoRoom(repoId));
   }
 
-  emitIssueCreated(repoId: number, issue: IssueDto): void {
+  emitIssueCreated(repoId: string, issue: IssueDto): void {
     this.server.to(repoRoom(repoId)).emit(SOCKET_EVENTS.issueCreated, { repoId, issue });
   }
 
-  emitIssueUpdated(repoId: number, issue: IssueDto): void {
+  async refreshRepoAccess(repoId: string): Promise<void> {
+    const sockets = await this.server.in(repoRoom(repoId)).fetchSockets();
+    await Promise.all(
+      sockets.map(async (socket) => {
+        try {
+          await this.access.requireMember(socket.data.user as User, repoId);
+        } catch {
+          await socket.leave(repoRoom(repoId));
+        }
+      }),
+    );
+  }
+
+  emitIssueUpdated(repoId: string, issue: IssueDto): void {
     this.server.to(repoRoom(repoId)).emit(SOCKET_EVENTS.issueUpdated, { repoId, issue });
   }
 
-  emitIssueDeleted(repoId: number, number: number): void {
+  emitIssueDeleted(repoId: string, number: number): void {
     this.server.to(repoRoom(repoId)).emit(SOCKET_EVENTS.issueDeleted, { repoId, number });
   }
 }

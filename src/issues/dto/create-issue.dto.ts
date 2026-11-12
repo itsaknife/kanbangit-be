@@ -1,6 +1,16 @@
-import { IsArray, IsDateString, IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
+import {
+  IsUUID,
+  IsArray,
+  IsDateString,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  MaxLength,
+} from 'class-validator';
 
 export class CreateIssueDto {
+  @IsUUID()
+  trackerId!: string;
   @IsString()
   @IsNotEmpty()
   @MaxLength(256)

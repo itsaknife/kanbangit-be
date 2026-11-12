@@ -11,7 +11,7 @@ export class SessionService {
     private readonly prisma: PrismaService,
   ) {}
 
-  sign(userId: number): Promise<string> {
+  sign(userId: string): Promise<string> {
     return this.jwt.signAsync({ sub: userId });
   }
 
@@ -19,7 +19,8 @@ export class SessionService {
   async verify(token: string | undefined): Promise<User | null> {
     if (!token) return null;
     try {
-      const payload = await this.jwt.verifyAsync<{ sub: number }>(token);
+      const payload = await this.jwt.verifyAsync<{ sub: string }>(token);
+      if (typeof payload.sub !== 'string') return null;
       return await this.prisma.user.findUnique({ where: { id: payload.sub } });
     } catch {
       return null;

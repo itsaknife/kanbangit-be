@@ -96,6 +96,8 @@ export const assigneesOf = (issue: Pick<Issue, 'assignees'>) =>
 export function toIssueDto(issue: Issue): IssueDto {
   return {
     id: issue.id,
+    trackerId: issue.trackerId,
+    issueCode: issue.issueCode,
     number: issue.number,
     title: issue.title,
     body: issue.body,

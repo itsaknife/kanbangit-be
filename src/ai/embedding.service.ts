@@ -16,7 +16,7 @@ export function toVectorLiteral(values: number[]): string {
 }
 
 interface PendingIssue {
-  id: number;
+  id: string;
   title: string;
   body: string | null;
 }
@@ -25,7 +25,7 @@ interface PendingIssue {
 @Injectable()
 export class EmbeddingService {
   private readonly logger = new Logger(EmbeddingService.name);
-  private readonly running = new Set<number>();
+  private readonly running = new Set<string>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -39,7 +39,7 @@ export class EmbeddingService {
   }
 
   /** Xóa vector cũ của issue (khi tiêu đề hoặc mô tả đổi) để lần sau tạo lại. */
-  async invalidate(issueId: number): Promise<void> {
+  async invalidate(issueId: string): Promise<void> {
     await this.prisma.$executeRaw`UPDATE "Issue" SET embedding = NULL WHERE id = ${issueId}`;
   }
 
@@ -47,7 +47,7 @@ export class EmbeddingService {
    * Tạo vector cho các issue của repository chưa có vector, chạy nền (không chờ kết quả).
    * Gói miễn phí có giới hạn lượt gọi nên làm theo từng lô, gặp lỗi thì dừng và để lần sau làm tiếp.
    */
-  queueRepo(repoId: number): void {
+  queueRepo(repoId: string): void {
     if (!this.gemini.isConfigured || this.running.has(repoId)) return;
     this.running.add(repoId);
     void this.embedPending(repoId)
@@ -57,7 +57,7 @@ export class EmbeddingService {
       .finally(() => this.running.delete(repoId));
   }
 
-  private async embedPending(repoId: number): Promise<void> {
+  private async embedPending(repoId: string): Promise<void> {
     for (;;) {
       const pending = await this.prisma.$queryRaw<PendingIssue[]>`
         SELECT id, title, body FROM "Issue"

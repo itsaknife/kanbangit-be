@@ -38,7 +38,7 @@ export class WebhooksService {
     if (event !== 'issues') return; // ping và các sự kiện khác không cần xử lý
 
     const { action, issue, repository } = payload as IssuesEventPayload;
-    const connected = await this.prisma.repository.findUnique({ where: { id: repository.id } });
+    const connected = await this.prisma.repository.findUnique({ where: { githubId: BigInt(repository.id) } });
     if (!connected) return; // repository chưa kết nối
 
     this.logger.debug(`${connected.fullName} #${issue.number}: ${action}`);

@@ -6,9 +6,12 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard.js';
 import { AuthController } from './auth.controller.js';
 import { AuthService } from './auth.service.js';
 import { SessionService } from './session.service.js';
+import { GithubModule } from '../github/github.module.js';
+import { AvatarFilesController, ProfileController } from './profile.controller.js';
 
 @Module({
   imports: [
+    GithubModule,
     JwtModule.registerAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService<Env, true>) => ({
@@ -17,7 +20,7 @@ import { SessionService } from './session.service.js';
       }),
     }),
   ],
-  controllers: [AuthController],
+  controllers: [AuthController, ProfileController, AvatarFilesController],
   providers: [AuthService, SessionService, JwtAuthGuard],
   exports: [SessionService, JwtAuthGuard],
 })

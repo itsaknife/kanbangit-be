@@ -20,6 +20,8 @@ model User {
   login       String   @unique
   name        String?
   avatarUrl   String
+  displayName String?
+  customAvatarUrl String?
   /// Token GitHub đã mã hóa (AES-256-GCM), dùng để gọi GitHub thay mặt người dùng.
   accessToken String
   createdAt   DateTime @default(now())

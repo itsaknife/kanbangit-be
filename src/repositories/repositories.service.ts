@@ -30,7 +30,7 @@ export class RepositoriesService {
   }
   async available(user: User) {
     const repos = (await this.github.listRepos(user, true)).filter(
-      (repo) => repo.ownerType !== 'Organization',
+      (repo) => repo.ownerType === 'User' && repo.canManage,
     );
     const existing = await this.prisma.repository.findMany({
       where: { githubId: { in: repos.map((repo) => BigInt(repo.id)) } },

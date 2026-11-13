@@ -9,6 +9,8 @@ import type { Env } from '../config/env.js';
 import type { User } from '../generated/prisma/client.js';
 import { AuthService } from './auth.service.js';
 import { SessionService } from './session.service.js';
+import { GithubService } from '../github/github.service.js';
+import { publicProfile } from './profile.controller.js';
 
 const STATE_COOKIE = 'oauth_state';
 const SESSION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -19,6 +21,7 @@ export class AuthController {
     private readonly auth: AuthService,
     private readonly session: SessionService,
     private readonly config: ConfigService<Env, true>,
+    private readonly github: GithubService,
   ) {}
 
   /** Bắt đầu đăng nhập: chuyển hướng sang GitHub. `state` chống giả mạo yêu cầu đăng nhập. */
@@ -58,8 +61,9 @@ export class AuthController {
 
   @Get('me')
   @UseGuards(JwtAuthGuard)
-  me(@CurrentUser() user: User) {
-    return { id: user.id, login: user.login, name: user.name, avatarUrl: user.avatarUrl };
+  async me(@CurrentUser() user: User) {
+    await this.github.client(user).rest.users.getAuthenticated({ request: { timeout: 10000 } });
+    return publicProfile(user);
   }
 
   @Post('logout')

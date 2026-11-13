@@ -156,7 +156,11 @@ describe('ứng dụng', () => {
     emitIssueUpdated: vi.fn(),
     emitIssueDeleted: vi.fn(),
   };
-  const github = { listRepos: vi.fn(async () => [repoAsMember]) };
+  const getAuthenticated = vi.fn(async () => ({ data: { id: 1 } }));
+  const github = {
+    listRepos: vi.fn(async () => [repoAsMember]),
+    client: vi.fn(() => ({ rest: { users: { getAuthenticated } } })),
+  };
 
   beforeAll(async () => {
     prisma = createFakePrisma();
@@ -202,6 +206,26 @@ describe('ứng dụng', () => {
         name: 'Huy',
         avatarUrl: 'https://a/huy.png',
       });
+    });
+
+    it('rejects a valid local session when GitHub has revoked its token', async () => {
+      getAuthenticated.mockRejectedValueOnce(
+        new RequestError('Bad credentials', 401, {
+          request: { method: 'GET', url: 'https://api.github.com/user', headers: {} },
+        }),
+      );
+      const res = await request(app.getHttpServer()).get('/auth/me').set('Cookie', cookie);
+      expect(res.status).toBe(401);
+    });
+
+    it('keeps GitHub outages distinct from expired authentication', async () => {
+      getAuthenticated.mockRejectedValueOnce(
+        new RequestError('Unavailable', 503, {
+          request: { method: 'GET', url: 'https://api.github.com/user', headers: {} },
+        }),
+      );
+      const res = await request(app.getHttpServer()).get('/auth/me').set('Cookie', cookie);
+      expect(res.status).toBe(502);
     });
 
     it('chuyển hướng sang GitHub kèm state và đặt cookie chống giả mạo', async () => {

@@ -38,7 +38,7 @@ function fixture() {
       findUnique: vi.fn(async () => repo),
       upsert: vi.fn(async () => repo),
       update: vi.fn(async () => repo),
-      findMany: vi.fn(async () => [{ id: '10000000-0000-4000-8000-000000000100' }]),
+      findMany: vi.fn(async () => [{ id: '10000000-0000-4000-8000-000000000100', githubId: 100n }]),
     },
     issue: { groupBy: vi.fn(async () => []), count: vi.fn(async () => 0) },
     tracker: { upsert: vi.fn(async () => ({})), findMany: vi.fn(async () => []) },
@@ -84,6 +84,23 @@ function fixture() {
 }
 
 describe('M1 GitHub Integration', () => {
+  it('only offers personal repositories with GitHub admin access that are not imported', async () => {
+    const f = fixture();
+    f.github.listRepos.mockResolvedValue([
+      { ...repo, id: 100, canManage: true, ownerType: 'User' },
+      { ...repo, id: 101, canManage: false, ownerType: 'User' },
+      { ...repo, id: 102, canManage: true, ownerType: 'Organization' },
+      { ...repo, id: 103, canManage: true, ownerType: 'User' },
+    ]);
+    const result = await f.repositories.available(user);
+    expect(result.map((item) => item.githubId)).toEqual(['103']);
+    expect(f.github.listRepos).toHaveBeenCalledWith(user, true);
+    expect(f.tx.repository.findMany).toHaveBeenCalledWith({
+      where: { githubId: { in: [100n, 103n] } },
+      select: { githubId: true },
+    });
+  });
+
   it('validates repo name, visibility and description length', async () => {
     for (const body of [
       { name: '../bad', visibility: 'PUBLIC' },
@@ -180,6 +197,28 @@ describe('M1 GitHub Integration', () => {
     await expect(
       f.access.requireConnectedOwner(user, '10000000-0000-4000-8000-000000000100'),
     ).resolves.toHaveProperty('connected.id', '10000000-0000-4000-8000-000000000100');
+  });
+
+  it('lists owned and admin repositories for import, hiding member-only repositories', async () => {
+    const f = fixture();
+    f.tx.repository.findMany.mockResolvedValue([]);
+    f.github.listRepos.mockResolvedValue([
+      { ...repo, id: 100, owner: 'OWNER', canManage: true, ownerType: 'User' },
+      { ...repo, id: 101, owner: 'someone-else', canManage: true, ownerType: 'User' },
+      { ...repo, id: 102, owner: 'org', canManage: true, ownerType: 'Organization' },
+      { ...repo, id: 103, owner: 'someone-else', canManage: false, ownerType: 'User' },
+    ]);
+    const available = await f.repositories.available(user);
+    expect(available.map((item) => item.githubId)).toEqual(['100', '101']);
+  });
+
+  it('rejects direct import of member-only repositories', async () => {
+    const f = fixture();
+    f.github.listRepos.mockResolvedValue([
+      { ...repo, id: 100, owner: 'someone-else', canManage: false, ownerType: 'User' },
+    ]);
+    await expect(f.repositories.import(user, '100')).rejects.toThrow('quản trị');
+    expect(f.issues.backfill).not.toHaveBeenCalled();
   });
 
   it('rejects organization import', async () => {

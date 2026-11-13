@@ -8,8 +8,9 @@ import {
   IsString,
   MaxLength,
 } from 'class-validator';
+import { PlanningDto } from './planning.dto.js';
 
-export class UpdateIssueDto {
+export class UpdateIssueDto extends PlanningDto {
   @ValidateIf((_object, value) => value !== undefined)
   @IsUUID()
   trackerId?: string;

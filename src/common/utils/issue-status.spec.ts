@@ -3,12 +3,12 @@ import { IssueState, IssueStatus } from '../../generated/prisma/client.js';
 import { deriveStatus } from './issue-status.js';
 
 describe('deriveStatus', () => {
-  it('issue đã đóng là done, dù còn nhãn in progress', () => {
-    expect(deriveStatus(IssueState.closed, ['in progress'])).toBe(IssueStatus.done);
+  it('imports closed GitHub issues as closed', () => {
+    expect(deriveStatus(IssueState.closed, ['in progress'])).toBe(IssueStatus.closed);
   });
 
-  it('issue đang mở có nhãn in progress là in_progress (không phân biệt hoa thường)', () => {
-    expect(deriveStatus(IssueState.open, ['bug', 'In Progress'])).toBe(IssueStatus.in_progress);
+  it('does not infer local progress from GitHub labels', () => {
+    expect(deriveStatus(IssueState.open, ['bug', 'In Progress'])).toBe(IssueStatus.todo);
   });
 
   it('issue đang mở không có nhãn trạng thái là todo', () => {

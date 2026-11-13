@@ -59,7 +59,7 @@ export class DashboardService {
     for (const issue of issues) {
       if (issue.status === IssueStatus.todo) todo += 1;
       else if (issue.status === IssueStatus.in_progress) inProgress += 1;
-      else done += 1;
+      else if (issue.status === IssueStatus.done || issue.status === IssueStatus.closed) done += 1;
 
       if (issue.closedAt && issue.closedAt >= range.startUtc && issue.closedAt < range.endUtc) {
         closedThisWeek += 1;
@@ -77,7 +77,8 @@ export class DashboardService {
         };
         if (issue.status === IssueStatus.todo) member.todo += 1;
         else if (issue.status === IssueStatus.in_progress) member.inProgress += 1;
-        else member.done += 1;
+        else if (issue.status === IssueStatus.done || issue.status === IssueStatus.closed)
+          member.done += 1;
         members.set(assignee.login, member);
       }
     }

@@ -27,6 +27,12 @@ const issue: IssueDto = {
   updatedAt: '2026-10-01T00:00:00.000Z',
   closedAt: null,
   dueDate: null,
+  assigneeId: null,
+  startDate: null,
+  endDate: null,
+  estimateMinutes: null,
+  parentId: null,
+  syncStatus: 'SYNCED',
 };
 
 const user = { id: 1, login: 'huy' };
@@ -103,8 +109,8 @@ describe('RealtimeGateway', () => {
     expect(await created).toEqual({ repoId: '10000000-0000-4000-8000-000000000100', issue });
 
     const deleted = once(socket, SOCKET_EVENTS.issueDeleted);
-    gateway.emitIssueDeleted('10000000-0000-4000-8000-000000000100', 5);
-    expect(await deleted).toEqual({ repoId: '10000000-0000-4000-8000-000000000100', number: 5 });
+    gateway.emitIssueDeleted('10000000-0000-4000-8000-000000000100', issue.id);
+    expect(await deleted).toEqual({ repoId: '10000000-0000-4000-8000-000000000100', id: issue.id });
   });
 
   it('không nhận dữ liệu của repo mình không có quyền, và ngừng nhận sau khi rời phòng', async () => {

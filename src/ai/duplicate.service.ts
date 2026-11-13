@@ -13,11 +13,12 @@ const BODY_PREVIEW_LENGTH = 800;
 
 export interface DuplicateCheckResult {
   isDuplicate: boolean;
-  candidates: Array<{ issueNumber: number; title: string; reason: string }>;
+  candidates: Array<{ issueId: string; issueNumber: number | null; title: string; reason: string }>;
 }
 
 interface CandidateRow {
-  number: number;
+  id: string;
+  number: number | null;
   title: string;
   body: string | null;
   similarity: number;
@@ -71,7 +72,7 @@ export class DuplicateService {
     const queryVector = await this.embeddings.embedQuery(buildIssueText(dto.title, dto.body));
     const literal = toVectorLiteral(queryVector);
     const rows = await this.prisma.$queryRaw<CandidateRow[]>`
-      SELECT number, title, body, 1 - (embedding <=> ${literal}::vector) AS similarity
+      SELECT id, number, title, body, 1 - (embedding <=> ${literal}::vector) AS similarity
       FROM "Issue"
       WHERE "repoId" = ${repoId} AND embedding IS NOT NULL
       ORDER BY embedding <=> ${literal}::vector
@@ -86,12 +87,20 @@ export class DuplicateService {
       duplicates: Array<{ issueNumber: number; reason: string }>;
     }>(SYSTEM_PROMPT, this.buildPrompt(dto, candidates), RESPONSE_SCHEMA);
 
-    const byNumber = new Map(candidates.map((candidate) => [candidate.number, candidate]));
+    // Temporary ordinal references keep local issues without GitHub numbers distinguishable.
+    const byNumber = new Map(candidates.map((candidate, index) => [index + 1, candidate]));
     const confirmed = (result.duplicates ?? []).flatMap((item) => {
       const candidate = byNumber.get(item.issueNumber);
       // Bỏ qua số issue LLM tự bịa ra, không nằm trong danh sách ứng viên
       return candidate
-        ? [{ issueNumber: candidate.number, title: candidate.title, reason: item.reason }]
+        ? [
+            {
+              issueId: candidate.id,
+              issueNumber: candidate.number,
+              title: candidate.title,
+              reason: item.reason,
+            },
+          ]
         : [];
     });
     this.logger.debug(
@@ -104,8 +113,8 @@ export class DuplicateService {
   private buildPrompt(dto: DuplicateCheckDto, candidates: CandidateRow[]): string {
     const candidateText = candidates
       .map(
-        (candidate) =>
-          `--- Issue #${candidate.number} ---\nTiêu đề: ${candidate.title}\nMô tả: ${(candidate.body ?? '(trống)').slice(0, BODY_PREVIEW_LENGTH)}`,
+        (candidate, index) =>
+          `--- Issue #${index + 1} ---\nTiêu đề: ${candidate.title}\nMô tả: ${(candidate.body ?? '(trống)').slice(0, BODY_PREVIEW_LENGTH)}`,
       )
       .join('\n\n');
 

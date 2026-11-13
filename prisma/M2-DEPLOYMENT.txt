@@ -1,6 +1,7 @@
 M2 Core Data & Permission -- deployed migration
 
 Migration: 202611110003_core_data_permission
+Follow-up: 202611130005_core_lookup_indexes deployed successfully on 2026-11-13.
 Status: deployed to the configured application database on 2026-11-11.
 Prisma migrate deploy reported all migrations successfully applied.
 The user explicitly requested direct deployment without further tests or rehearsal.

@@ -44,6 +44,7 @@ next-env.d.ts
 .README.md
 
 *.md
+*.txt
 
 build
 dist

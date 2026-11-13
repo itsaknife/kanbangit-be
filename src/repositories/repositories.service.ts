@@ -61,7 +61,7 @@ export class RepositoriesService {
     await this.access.requireMember(user, repoId);
     return this.prisma.repositoryMember.findMany({
       where: { repositoryId: repoId, isActive: true },
-      select: { login: true, avatarUrl: true },
+      select: { id: true, login: true, avatarUrl: true },
     });
   }
   async import(user: User, githubId: string) {

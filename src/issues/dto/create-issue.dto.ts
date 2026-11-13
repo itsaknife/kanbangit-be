@@ -7,8 +7,9 @@ import {
   IsString,
   MaxLength,
 } from 'class-validator';
+import { PlanningDto } from './planning.dto.js';
 
-export class CreateIssueDto {
+export class CreateIssueDto extends PlanningDto {
   @IsUUID()
   trackerId!: string;
   @IsString()

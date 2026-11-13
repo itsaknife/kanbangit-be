@@ -12,7 +12,7 @@ datasource db {
   provider = "postgresql"
 }
 
-/// Người dùng đăng nhập bằng GitHub. id chính là id tài khoản GitHub.
+/// UUID nội bộ; githubId liên kết tài khoản GitHub, độc lập với id.
 model User {
   id          String   @id @default(uuid())
   legacyId    Int?     @unique
@@ -32,7 +32,7 @@ model User {
   memberships           RepositoryMember[]
 }
 
-/// Repository đã được kết nối vào hệ thống. id chính là id repository trên GitHub.
+/// Repository đã kết nối; UUID nội bộ độc lập với githubId.
 model Repository {
   id            String   @id @default(uuid())
   legacyId      Int?     @unique
@@ -54,6 +54,7 @@ model Repository {
   members         RepositoryMember[]
   trackers        Tracker[]
   trackerPrefixes TrackerPrefix[]
+  syncJobs SyncJob[]
 }
 
 enum RepositoryRole {
@@ -84,8 +85,12 @@ model RepositoryMember {
   isActive         Boolean @default(true)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
+  assignedIssues Issue[]
+  statusChanges IssueStatusHistory[]
 
   @@unique([repositoryId, githubUserId])
+  @@unique([id, repositoryId])
+  @@index([repositoryId, login])
   @@index([userId])
 }
 
@@ -107,6 +112,7 @@ model Tracker {
   @@unique([id, repositoryId])
   @@unique([repositoryId, name])
   @@unique([repositoryId, prefix])
+  @@index([repositoryId, isActive])
 }
 
 model TrackerPrefix {
@@ -125,21 +131,33 @@ enum IssueState {
   closed
 }
 
-/// Cột trên bảng Kanban. Trên GitHub: done = issue đã đóng, in_progress = đang mở + nhãn "in progress".
+/// Trạng thái KanbanGit; chỉ closed/canceled ánh xạ sang GitHub closed.
 enum IssueStatus {
   todo
   in_progress
   done
+  verified
+  closed
+  reopen
+  rejected
+  paused
+  canceled
 }
 
-/// Bản sao issue từ GitHub. GitHub vẫn là nguồn gốc, bảng này để xem nhanh, thống kê và tìm issue trùng.
+enum SyncStatus {
+  PENDING_SYNC
+  SYNCED
+  NEEDS_ATTENTION
+}
+
+/// Issue do KanbanGit quản lý. GitHub identifiers nullable cho tới khi sync tạo issue thành công.
 model Issue {
   id           String      @id @default(uuid())
   legacyId     Int?        @unique
-  githubId     BigInt
+  githubId     BigInt?
   repoId       String
   repository   Repository  @relation(fields: [repoId], references: [id], onDelete: Cascade)
-  number       Int
+  number       Int?
   issueCode    String
   trackerId    String
   tracker      Tracker @relation(fields: [trackerId, repoId], references: [id, repositoryId], onDelete: Restrict)
@@ -153,25 +171,67 @@ model Issue {
   assignees    Json        @default("[]")
   authorLogin  String?
   authorAvatar String?
-  htmlUrl      String
+  htmlUrl      String?
   /// Thời điểm cập nhật cuối theo GitHub, dùng để bỏ qua webhook trùng với thay đổi do chính app gây ra.
-  githubUpdatedAt DateTime
-  githubCreatedAt DateTime
+  githubUpdatedAt DateTime?
+  githubCreatedAt DateTime?
   closedAt     DateTime?
   /// Hạn hoàn thành do Kanbangit quản lý; GitHub Issues không có trường tương ứng.
   dueDate      DateTime?
+  startDate DateTime? @db.Date
+  endDate DateTime? @db.Date
+  estimateMinutes Int?
+  assigneeId String?
+  assignee RepositoryMember? @relation(fields: [assigneeId, repoId], references: [id, repositoryId], onDelete: Restrict)
+  parentId String?
+  parent Issue? @relation("IssueHierarchy", fields: [parentId, repoId], references: [id, repoId], onDelete: Restrict)
+  children Issue[] @relation("IssueHierarchy")
+  statusHistory IssueStatusHistory[]
+  syncStatus SyncStatus @default(SYNCED)
+  syncJobs SyncJob[]
   /// Vector ý nghĩa của issue (768 chiều) để tìm issue gần giống. Tạo cột bằng Prisma, chỉ đọc/ghi bằng SQL thô.
   embedding    Unsupported("vector(768)")?
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
 
   @@unique([repoId, number])
+  @@unique([id, repoId])
   @@unique([repoId, issueCode])
   @@index([repoId, trackerId])
   @@unique([githubId])
   @@index([repoId, status])
   @@index([repoId, closedAt])
   @@index([repoId, dueDate])
+  @@index([repoId, endDate])
+  @@index([repoId, parentId])
+  @@index([repoId, assigneeId])
+}
+
+model IssueStatusHistory {
+  id String @id @default(uuid())
+  issueId String
+  issue Issue @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  fromStatus IssueStatus?
+  toStatus IssueStatus
+  changedById String?
+  changedBy RepositoryMember? @relation(fields: [changedById], references: [id], onDelete: SetNull)
+  source String @default("APP")
+  createdAt DateTime @default(now())
+  @@index([issueId, createdAt])
+}
+
+// M3 transactional outbox foundation. Processing and retry policy are M5.
+model SyncJob {
+  id String @id @default(uuid())
+  repositoryId String
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  issueId String
+  issue Issue @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  operation String
+  status String @default("PENDING")
+  idempotencyKey String @unique
+  createdAt DateTime @default(now())
+  @@index([issueId, status])
 }
 
 /// Báo cáo tiến độ tuần do LLM viết.

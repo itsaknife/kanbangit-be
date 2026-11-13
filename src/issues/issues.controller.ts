@@ -1,76 +1,98 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
-  ParseIntPipe,
   ParseUUIDPipe,
   Patch,
   Post,
+  Put,
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { IsOptional, IsString, MaxLength } from 'class-validator';
-class IssueSearchQuery {
-  @IsOptional() @IsString() @MaxLength(200) search?: string;
-}
 import { CurrentUser } from '../common/decorators/current-user.decorator.js';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard.js';
 import type { User } from '../generated/prisma/client.js';
 import { CreateIssueDto } from './dto/create-issue.dto.js';
 import { UpdateIssueDto } from './dto/update-issue.dto.js';
 import { UpdateStatusDto } from './dto/update-status.dto.js';
+import { ParentDto } from './dto/planning.dto.js';
+import { IssueListQuery } from './dto/issue-list.dto.js';
 import { IssuesService } from './issues.service.js';
 
 @Controller('repositories/:repoId/issues')
 @UseGuards(JwtAuthGuard)
 export class IssuesController {
   constructor(private readonly issues: IssuesService) {}
-
-  @Get()
-  list(
+  @Get() list(
     @CurrentUser() user: User,
     @Param('repoId', ParseUUIDPipe) repoId: string,
-    @Query() query: IssueSearchQuery,
+    @Query() query: IssueListQuery,
   ) {
-    return this.issues.list(user, repoId, query.search);
+    return this.issues.list(user, repoId, {
+      ...query,
+      page: query.page ?? 1,
+      limit: query.limit ?? 20,
+    });
   }
-
-  @Get(':number')
-  get(
-    @CurrentUser() user: User,
-    @Param('repoId', ParseUUIDPipe) repoId: string,
-    @Param('number', ParseIntPipe) number: number,
-  ) {
-    return this.issues.get(user, repoId, number);
-  }
-
-  @Post()
-  create(
+  @Post() create(
     @CurrentUser() user: User,
     @Param('repoId', ParseUUIDPipe) repoId: string,
     @Body() dto: CreateIssueDto,
   ) {
     return this.issues.create(user, repoId, dto);
   }
-
-  @Patch(':number')
-  update(
+  @Get(':issueId') get(
     @CurrentUser() user: User,
     @Param('repoId', ParseUUIDPipe) repoId: string,
-    @Param('number', ParseIntPipe) number: number,
+    @Param('issueId', ParseUUIDPipe) id: string,
+  ) {
+    return this.issues.get(user, repoId, id);
+  }
+  @Patch(':issueId') update(
+    @CurrentUser() user: User,
+    @Param('repoId', ParseUUIDPipe) repoId: string,
+    @Param('issueId', ParseUUIDPipe) id: string,
     @Body() dto: UpdateIssueDto,
   ) {
-    return this.issues.update(user, repoId, number, dto);
+    return this.issues.update(user, repoId, id, dto);
   }
-
-  @Patch(':number/status')
-  updateStatus(
+  @Patch(':issueId/status') status(
     @CurrentUser() user: User,
     @Param('repoId', ParseUUIDPipe) repoId: string,
-    @Param('number', ParseIntPipe) number: number,
+    @Param('issueId', ParseUUIDPipe) id: string,
     @Body() dto: UpdateStatusDto,
   ) {
-    return this.issues.updateStatus(user, repoId, number, dto.status);
+    return this.issues.updateStatus(user, repoId, id, dto.status);
+  }
+  @Put(':issueId/parent') parent(
+    @CurrentUser() user: User,
+    @Param('repoId', ParseUUIDPipe) repoId: string,
+    @Param('issueId', ParseUUIDPipe) id: string,
+    @Body() dto: ParentDto,
+  ) {
+    return this.issues.setParent(user, repoId, id, dto.parentId);
+  }
+  @Delete(':issueId/parent') detach(
+    @CurrentUser() user: User,
+    @Param('repoId', ParseUUIDPipe) repoId: string,
+    @Param('issueId', ParseUUIDPipe) id: string,
+  ) {
+    return this.issues.setParent(user, repoId, id, null);
+  }
+  @Get(':issueId/sub-issues') children(
+    @CurrentUser() user: User,
+    @Param('repoId', ParseUUIDPipe) repoId: string,
+    @Param('issueId', ParseUUIDPipe) id: string,
+  ) {
+    return this.issues.subIssues(user, repoId, id);
+  }
+  @Post(':issueId/cascade-close') close(
+    @CurrentUser() user: User,
+    @Param('repoId', ParseUUIDPipe) repoId: string,
+    @Param('issueId', ParseUUIDPipe) id: string,
+  ) {
+    return this.issues.cascadeClose(user, repoId, id);
   }
 }

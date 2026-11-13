@@ -37,7 +37,7 @@ function describe(issues: Issue[]): string {
   if (issues.length === 0) return '(không có)';
   const lines = issues
     .slice(0, MAX_LISTED_ISSUES)
-    .map((issue) => `- #${issue.number} "${issue.title}" (phụ trách: ${assigneeNames(issue)})`);
+    .map((issue) => `- ${issue.issueCode} "${issue.title}" (phụ trách: ${assigneeNames(issue)})`);
   if (issues.length > MAX_LISTED_ISSUES)
     lines.push(`- ... và ${issues.length - MAX_LISTED_ISSUES} issue khác`);
   return lines.join('\n');
@@ -91,7 +91,7 @@ export class WeeklySummaryService {
     const inRange = (date: Date | null) => !!date && date >= range.startUtc && date < range.endUtc;
 
     const closedThisWeek = issues.filter((issue) => inRange(issue.closedAt));
-    const openedThisWeek = issues.filter((issue) => inRange(issue.githubCreatedAt));
+    const openedThisWeek = issues.filter((issue) => inRange(issue.createdAt));
     const inProgress = issues.filter((issue) => issue.status === IssueStatus.in_progress);
     const todoCount = issues.filter((issue) => issue.status === IssueStatus.todo).length;
 

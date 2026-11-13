@@ -109,9 +109,17 @@ export function toIssueDto(issue: Issue): IssueDto {
       ? { login: issue.authorLogin, avatarUrl: issue.authorAvatar ?? '' }
       : null,
     htmlUrl: issue.htmlUrl,
-    createdAt: issue.githubCreatedAt.toISOString(),
-    updatedAt: issue.githubUpdatedAt.toISOString(),
+    createdAt: (issue.createdAt ?? issue.githubCreatedAt ?? new Date(0)).toISOString(),
+    updatedAt: (issue.updatedAt ?? issue.githubUpdatedAt ?? new Date(0)).toISOString(),
     closedAt: issue.closedAt?.toISOString() ?? null,
     dueDate: issue.dueDate?.toISOString() ?? null,
+    assigneeId: issue.assigneeId ?? null,
+    startDate: issue.startDate?.toISOString().slice(0, 10) ?? null,
+    endDate: issue.endDate?.toISOString().slice(0, 10) ?? null,
+    estimateMinutes: issue.estimateMinutes ?? null,
+    parentId: issue.parentId ?? null,
+    subIssueEstimateMinutes: 0,
+    combinedEstimateMinutes: issue.estimateMinutes ?? null,
+    syncStatus: issue.syncStatus ?? 'SYNCED',
   };
 }

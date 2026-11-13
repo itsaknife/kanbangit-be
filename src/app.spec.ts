@@ -39,6 +39,8 @@ const user = {
   login: 'huy',
   name: 'Huy',
   avatarUrl: 'https://a/huy.png',
+  displayName: null,
+  customAvatarUrl: null,
   accessToken: encrypt('gho_fake', ENCRYPTION_KEY),
 };
 
@@ -60,6 +62,7 @@ function createFakePrisma() {
   const db = {
     user: { findUnique: vi.fn(async () => user) },
     repositoryMember: {
+      findFirst: vi.fn(async () => null),
       findUnique: vi.fn(async () => ({ role: 'MEMBER', isActive: true, userId: user.id })),
       findMany: vi.fn(async () => [
         {
@@ -95,6 +98,7 @@ function createFakePrisma() {
       findUniqueOrThrow: vi.fn(async () => ({ id: 'tracker', prefix: 'TASK', nextSequence: 2 })),
     },
     issue: {
+      findMany: vi.fn(async () => [...issues.values()]),
       count: vi.fn(async () => 2),
       create: vi.fn(async ({ data }: any) => {
         const saved = { id: 'issue-id', ...data };
@@ -123,6 +127,7 @@ function createFakePrisma() {
       })),
       groupBy: vi.fn(async () => [{ repoId: 100, _count: { _all: 2 } }]),
     },
+    issueStatusHistory: { create: vi.fn(async ({ data }: any) => data) },
     $executeRaw: vi.fn(async () => 1),
     $queryRaw: vi.fn(async () => []),
   };
@@ -205,6 +210,8 @@ describe('ứng dụng', () => {
         login: 'huy',
         name: 'Huy',
         avatarUrl: 'https://a/huy.png',
+        displayName: null,
+        customAvatarUrl: null,
       });
     });
 
@@ -218,14 +225,15 @@ describe('ứng dụng', () => {
       expect(res.status).toBe(401);
     });
 
-    it('keeps GitHub outages distinct from expired authentication', async () => {
+    it('keeps a valid local session usable during GitHub outages', async () => {
       getAuthenticated.mockRejectedValueOnce(
         new RequestError('Unavailable', 503, {
           request: { method: 'GET', url: 'https://api.github.com/user', headers: {} },
         }),
       );
       const res = await request(app.getHttpServer()).get('/auth/me').set('Cookie', cookie);
-      expect(res.status).toBe(502);
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ id: user.id, login: user.login });
     });
 
     it('chuyển hướng sang GitHub kèm state và đặt cookie chống giả mạo', async () => {
@@ -342,6 +350,42 @@ describe('ứng dụng', () => {
   });
 
   describe('kiểm tra dữ liệu gửi lên', () => {
+    it('returns the default pagination envelope for HTTP issue lists', async () => {
+      const repoId = '10000000-0000-4000-8000-000000000100';
+      const issue = {
+        id: '10000000-0000-4000-8000-000000000005',
+        repoId,
+        trackerId: '10000000-0000-4000-8000-000000000010',
+        issueCode: 'TASK-001',
+        number: null,
+        title: 'Local issue',
+        body: null,
+        status: 'todo',
+        state: 'open',
+        labels: [],
+        assignees: [],
+        parentId: null,
+        estimateMinutes: 30,
+        syncStatus: 'PENDING_SYNC',
+      };
+      prisma.issue.findMany.mockResolvedValueOnce([issue]).mockResolvedValueOnce([issue]);
+      prisma.issue.count.mockResolvedValueOnce(1);
+      const res = await request(app.getHttpServer())
+        .get(`/repositories/${repoId}/issues`)
+        .set('Cookie', cookie);
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({
+        data: [{ id: issue.id, number: null, combinedEstimateMinutes: 30 }],
+        pagination: { page: 1, limit: 20, total: 1, totalPages: 1 },
+      });
+      expect(prisma.issue.findMany).toHaveBeenLastCalledWith({
+        where: { repoId },
+        orderBy: { createdAt: 'desc' },
+        skip: 0,
+        take: 20,
+      });
+    });
+
     it('từ chối tiêu đề rỗng khi tạo issue', async () => {
       const res = await request(app.getHttpServer())
         .post('/repositories/10000000-0000-4000-8000-000000000100/issues')
@@ -352,7 +396,9 @@ describe('ứng dụng', () => {
 
     it('từ chối trạng thái không hợp lệ khi kéo thẻ', async () => {
       const res = await request(app.getHttpServer())
-        .patch('/repositories/10000000-0000-4000-8000-000000000100/issues/5/status')
+        .patch(
+          '/repositories/10000000-0000-4000-8000-000000000100/issues/10000000-0000-4000-8000-000000000005/status',
+        )
         .set('Cookie', cookie)
         .send({ status: 'xong' });
       expect(res.status).toBe(400);
@@ -395,7 +441,7 @@ describe('ứng dụng', () => {
       expect(realtime.emitIssueUpdated).not.toHaveBeenCalled();
     });
 
-    it('đóng issue trên GitHub: chuyển sang cột Hoàn thành và báo realtime', async () => {
+    it('GitHub close maps to closed and emits realtime', async () => {
       const closed = githubIssue({
         state: 'closed',
         closed_at: '2026-10-03T00:00:00Z',
@@ -405,7 +451,7 @@ describe('ứng dụng', () => {
       expect(realtime.emitIssueUpdated).toHaveBeenCalledTimes(1);
       expect(realtime.emitIssueUpdated.mock.calls[0]?.[1]).toMatchObject({
         state: IssueState.closed,
-        status: IssueStatus.done,
+        status: IssueStatus.closed,
       });
     });
 
@@ -415,12 +461,13 @@ describe('ứng dụng', () => {
       expect(realtime.emitIssueUpdated).not.toHaveBeenCalled();
     });
 
-    it('xóa issue: báo realtime', async () => {
+    it('GitHub deletion preserves the local issue and marks it NEEDS_ATTENTION', async () => {
       await post('issues', { action: 'deleted', issue: githubIssue(), repository: { id: 100 } });
-      expect(realtime.emitIssueDeleted).toHaveBeenCalledWith(
+      expect(realtime.emitIssueUpdated).toHaveBeenCalledWith(
         '10000000-0000-4000-8000-000000000100',
-        5,
+        expect.objectContaining({ number: 5, syncStatus: 'NEEDS_ATTENTION' }),
       );
+      expect(realtime.emitIssueDeleted).not.toHaveBeenCalled();
     });
 
     it('bỏ qua repository chưa kết nối', async () => {

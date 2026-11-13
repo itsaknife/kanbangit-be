@@ -11,6 +11,7 @@ import { AuthService } from './auth.service.js';
 import { SessionService } from './session.service.js';
 import { GithubService } from '../github/github.service.js';
 import { publicProfile } from './profile.controller.js';
+import { RequestError } from 'octokit';
 
 const STATE_COOKIE = 'oauth_state';
 const SESSION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -62,7 +63,12 @@ export class AuthController {
   @Get('me')
   @UseGuards(JwtAuthGuard)
   async me(@CurrentUser() user: User) {
-    await this.github.client(user).rest.users.getAuthenticated({ request: { timeout: 10000 } });
+    try {
+      await this.github.client(user).rest.users.getAuthenticated({ request: { timeout: 10000 } });
+    } catch (error) {
+      // Revoked credentials end the session; a GitHub outage must not block local work.
+      if (!(error instanceof RequestError) || error.status === 401) throw error;
+    }
     return publicProfile(user);
   }
 

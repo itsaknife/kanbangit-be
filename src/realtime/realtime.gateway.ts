@@ -95,7 +95,7 @@ export class RealtimeGateway implements OnGatewayInit {
     this.server.to(repoRoom(repoId)).emit(SOCKET_EVENTS.issueUpdated, { repoId, issue });
   }
 
-  emitIssueDeleted(repoId: string, number: number): void {
-    this.server.to(repoRoom(repoId)).emit(SOCKET_EVENTS.issueDeleted, { repoId, number });
+  emitIssueDeleted(repoId: string, id: string): void {
+    this.server.to(repoRoom(repoId)).emit(SOCKET_EVENTS.issueDeleted, { repoId, id });
   }
 }

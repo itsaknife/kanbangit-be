@@ -77,7 +77,7 @@ describe.skipIf(process.env.RUN_M2_DB_TESTS !== '1')(
       INSERT INTO "Repository"(id,name,owner,"fullName","isPrivate","connectedById","webhookId") VALUES(100,'app','owner','owner/app',true,1,77);`);
       await client.query(
         `INSERT INTO "Issue"("githubId","repoId",number,title,state,status,"htmlUrl","githubCreatedAt","githubUpdatedAt","updatedAt","dueDate",embedding)
-      VALUES(1001,100,1,'Legacy issue','open','todo','url','2026-11-01','2026-11-01',CURRENT_TIMESTAMP,'2026-11-15',$1::vector)`,
+      VALUES(1001,100,1,'Legacy issue','closed','done','url','2026-11-01','2026-11-01',CURRENT_TIMESTAMP,'2026-11-14T20:00:00Z',$1::vector)`,
         [`[1,${Array(767).fill(0).join(',')}]`],
       );
       await client.query(
@@ -92,6 +92,15 @@ describe.skipIf(process.env.RUN_M2_DB_TESTS !== '1')(
           'utf8',
         ),
       );
+      for (const migration of [
+        '202611120004_display_profile',
+        '202611130005_core_lookup_indexes',
+        '202611130006_issue_management',
+      ]) {
+        await client.query(
+          readFileSync(resolve(`prisma/migrations/${migration}/migration.sql`), 'utf8'),
+        );
+      }
       prisma = new PrismaClient({
         adapter: new PrismaPg(
           { connectionString, ssl, options: `-c search_path=${schema},public,${vectorSchema}` },
@@ -169,11 +178,17 @@ describe.skipIf(process.env.RUN_M2_DB_TESTS !== '1')(
       expect(issue.issueCode).toBe('TASK-001');
       expect(issue.trackerId).toBe(taskId);
       expect(issue.legacyId).toBe(1);
-      expect(issue.dueDate?.toISOString().slice(0, 10)).toBe('2026-11-15');
+      expect(issue.status).toBe('closed');
+      expect(issue.dueDate?.toISOString()).toBe('2026-11-14T20:00:00.000Z');
+      expect(issue.endDate?.toISOString().slice(0, 10)).toBe('2026-11-15');
+      expect(await prisma.issueStatusHistory.findMany({ where: { issueId: issue.id } })).toEqual([
+        expect.objectContaining({ toStatus: 'closed', source: 'SYSTEM' }),
+      ]);
       const vector = await prisma.$queryRaw<
-        Array<{ dims: number }>
-      >`SELECT vector_dims(embedding) AS dims FROM "Issue" WHERE id=${issue.id}`;
+        Array<{ dims: number; value: string }>
+      >`SELECT vector_dims(embedding) AS dims, embedding::text AS value FROM "Issue" WHERE id=${issue.id}`;
       expect(vector[0]?.dims).toBe(768);
+      expect(vector[0]?.value).toBe(`[1,${Array(767).fill(0).join(',')}]`);
     });
     it('uses local membership while GitHub is offline and enforces Owner only', async () => {
       await expect(access.requireMember(member, repoId)).resolves.toHaveProperty(
@@ -263,7 +278,8 @@ describe.skipIf(process.env.RUN_M2_DB_TESTS !== '1')(
       ).rejects.toThrow();
     });
     it('supports Issue Code search and rejects issue creation when every Tracker is inactive', async () => {
-      const list = await issues.list(member, repoId, 'task-001');
+      const result = await issues.list(member, repoId, 'task-001');
+      const list = Array.isArray(result) ? result : result.data;
       expect(list.some((issue) => issue.issueCode === 'TASK-001')).toBe(true);
       expect(list).toHaveLength(1);
       await prisma.tracker.updateMany({

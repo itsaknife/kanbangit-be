@@ -22,9 +22,9 @@ const base: GithubIssue = {
 };
 
 describe('toIssueFields', () => {
-  it('suy ra cột Đang làm từ nhãn và ẩn nhãn trạng thái khỏi danh sách nhãn', () => {
+  it('imports open issues as todo independently of legacy progress labels', () => {
     const fields = toIssueFields(base);
-    expect(fields.status).toBe(IssueStatus.in_progress);
+    expect(fields.status).toBe(IssueStatus.todo);
     expect(fields.labels).toEqual([{ name: 'bug', color: 'd73a4a' }]);
   });
 
@@ -32,10 +32,10 @@ describe('toIssueFields', () => {
     expect(toIssueFields(base).githubId).toBe(3_000_000_001n);
   });
 
-  it('issue đã đóng là done và có thời điểm đóng', () => {
+  it('imports closed issues as closed with their closure time', () => {
     const fields = toIssueFields({ ...base, state: 'closed', closed_at: '2026-10-03T00:00:00Z' });
     expect(fields.state).toBe(IssueState.closed);
-    expect(fields.status).toBe(IssueStatus.done);
+    expect(fields.status).toBe(IssueStatus.closed);
     expect(fields.closedAt?.toISOString()).toBe('2026-10-03T00:00:00.000Z');
   });
 

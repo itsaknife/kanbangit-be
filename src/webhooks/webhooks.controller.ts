@@ -21,11 +21,14 @@ export class WebhooksController {
     @Req() req: RawBodyRequest<Request>,
     @Headers('x-hub-signature-256') signature: string | undefined,
     @Headers('x-github-event') event: string | undefined,
+    @Headers('x-github-delivery') delivery: string | undefined,
     @Body() payload: unknown,
   ): Promise<{ ok: true }> {
     if (!req.rawBody) throw new BadRequestException('Thiếu nội dung yêu cầu');
     await this.webhooks.assertSignature(req.rawBody.toString('utf8'), signature);
-    await this.webhooks.handle(event, payload);
+    if (!delivery || !/^[a-f0-9-]{36}$/i.test(delivery))
+      throw new BadRequestException('Thiếu hoặc sai GitHub delivery ID');
+    await this.webhooks.handle(event, payload, delivery);
     return { ok: true };
   }
 }

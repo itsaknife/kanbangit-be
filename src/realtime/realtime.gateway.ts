@@ -98,4 +98,9 @@ export class RealtimeGateway implements OnGatewayInit {
   emitIssueDeleted(repoId: string, id: string): void {
     this.server.to(repoRoom(repoId)).emit(SOCKET_EVENTS.issueDeleted, { repoId, id });
   }
+
+  emitCollaborationChanged(repoId: string): void {
+    // Invalidation only: worklog contents/totals must be fetched with viewer-specific authorization.
+    this.server.to(repoRoom(repoId)).emit(SOCKET_EVENTS.collaborationChanged, { repoId });
+  }
 }

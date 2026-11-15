@@ -13,6 +13,8 @@ import { RealtimeModule } from './realtime/realtime.module.js';
 import { RepositoriesModule } from './repositories/repositories.module.js';
 import { WebhooksModule } from './webhooks/webhooks.module.js';
 import { TrackersModule } from './trackers/trackers.module.js';
+import { CollaborationModule } from './collaboration/collaboration.module.js';
+import { SyncModule } from './sync/sync.module.js';
 
 @Module({
   imports: [
@@ -27,6 +29,8 @@ import { TrackersModule } from './trackers/trackers.module.js';
     WebhooksModule,
     HealthModule,
     TrackersModule,
+    CollaborationModule,
+    SyncModule,
   ],
   providers: [{ provide: APP_FILTER, useClass: GithubExceptionFilter }],
 })

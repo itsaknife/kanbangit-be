@@ -214,7 +214,7 @@ describe.skipIf(process.env.RUN_M3_DB_TESTS !== '1')(
       });
       await prisma.syncJob.updateMany({
         where: { issueId: issue.id },
-        data: { status: 'COMPLETED' },
+        data: { status: 'SUCCEEDED' },
       });
       return issue;
     }
@@ -443,7 +443,7 @@ describe.skipIf(process.env.RUN_M3_DB_TESTS !== '1')(
       expect(await jobs(issue.id)).toEqual([expect.objectContaining({ operation: 'CREATE' })]);
       await prisma.syncJob.updateMany({
         where: { issueId: issue.id },
-        data: { status: 'COMPLETED' },
+        data: { status: 'SUCCEEDED' },
       });
       await prisma.issue.update({
         where: { id: issue.id },

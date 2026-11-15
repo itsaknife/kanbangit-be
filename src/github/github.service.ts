@@ -19,7 +19,13 @@ export class GithubService {
 
   client(user: Pick<User, 'accessToken'>): Octokit {
     const key = this.config.get('TOKEN_ENCRYPTION_KEY', { infer: true });
-    return new Octokit({ auth: decrypt(user.accessToken, key) });
+    // The durable outbox owns retries, including ambiguous CREATE responses.
+    return new Octokit({
+      auth: decrypt(user.accessToken, key),
+      request: { timeout: 30000 },
+      retry: { enabled: false },
+      throttle: { enabled: false },
+    });
   }
 
   /** Repository mà người dùng có quyền truy cập (lưu tạm 1 phút để đỡ gọi GitHub liên tục). */
@@ -133,6 +139,57 @@ export class GithubService {
   ): Promise<GithubIssue> {
     const { data } = await this.client(user).rest.issues.create({ owner, repo, ...payload });
     return data;
+  }
+
+  async getIssue(user: User, owner: string, repo: string, number: number): Promise<GithubIssue> {
+    return (await this.client(user).rest.issues.get({ owner, repo, issue_number: number })).data;
+  }
+
+  async requireWrite(user: User, owner: string, repo: string) {
+    const { data } = await this.client(user).rest.repos.get({ owner, repo });
+    if (!data.permissions?.push && !data.permissions?.admin && !data.permissions?.maintain)
+      throw Object.assign(new Error('GitHub write permission required'), { status: 403 });
+  }
+
+  async getParent(
+    user: User,
+    owner: string,
+    repo: string,
+    issueNumber: number,
+  ): Promise<GithubIssue | null> {
+    try {
+      return (
+        await this.client(user).request('GET /repos/{owner}/{repo}/issues/{issue_number}/parent', {
+          owner,
+          repo,
+          issue_number: issueNumber,
+        })
+      ).data as GithubIssue;
+    } catch (error) {
+      if ((error as { status?: number }).status === 404) return null;
+      throw error;
+    }
+  }
+
+  async setParent(
+    user: User,
+    owner: string,
+    repo: string,
+    child: GithubIssue,
+    parentNumber: number | null,
+  ) {
+    const previous = await this.getParent(user, owner, repo, child.number);
+    if ((previous?.number ?? null) === parentNumber) return;
+    if (previous)
+      await this.client(user).request(
+        'DELETE /repos/{owner}/{repo}/issues/{issue_number}/sub_issue',
+        { owner, repo, issue_number: previous.number, sub_issue_id: child.id },
+      );
+    if (parentNumber !== null)
+      await this.client(user).request(
+        'POST /repos/{owner}/{repo}/issues/{issue_number}/sub_issues',
+        { owner, repo, issue_number: parentNumber, sub_issue_id: child.id },
+      );
   }
 
   async updateIssue(

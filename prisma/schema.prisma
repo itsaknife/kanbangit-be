@@ -30,6 +30,8 @@ model User {
   connectedRepositories Repository[]
   weeklySummaries       WeeklySummary[]
   memberships           RepositoryMember[]
+  mentions CommentMention[]
+  notifications Notification[]
 }
 
 /// Repository đã kết nối; UUID nội bộ độc lập với githubId.
@@ -55,6 +57,8 @@ model Repository {
   trackers        Tracker[]
   trackerPrefixes TrackerPrefix[]
   syncJobs SyncJob[]
+  webhookEvents WebhookEvent[]
+  notifications Notification[]
 }
 
 enum RepositoryRole {
@@ -87,6 +91,8 @@ model RepositoryMember {
   updatedAt        DateTime @updatedAt
   assignedIssues Issue[]
   statusChanges IssueStatusHistory[]
+  worklogs Worklog[]
+  comments Comment[]
 
   @@unique([repositoryId, githubUserId])
   @@unique([id, repositoryId])
@@ -188,7 +194,12 @@ model Issue {
   children Issue[] @relation("IssueHierarchy")
   statusHistory IssueStatusHistory[]
   syncStatus SyncStatus @default(SYNCED)
+  syncVersion Int @default(0)
+  lastSyncedAt DateTime?
   syncJobs SyncJob[]
+  notifications Notification[]
+  worklogs Worklog[]
+  comments Comment[]
   /// Vector ý nghĩa của issue (768 chiều) để tìm issue gần giống. Tạo cột bằng Prisma, chỉ đọc/ghi bằng SQL thô.
   embedding    Unsupported("vector(768)")?
   createdAt    DateTime    @default(now())
@@ -207,6 +218,80 @@ model Issue {
   @@index([repoId, assigneeId])
 }
 
+model Worklog {
+  id String @id @default(uuid())
+  issueId String
+  issue Issue @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  memberId String
+  member RepositoryMember @relation(fields: [memberId], references: [id], onDelete: Restrict)
+  githubUserId BigInt
+  startAt DateTime @db.Timestamptz(3)
+  endAt DateTime @db.Timestamptz(3)
+  durationMinutes Float
+  description String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([issueId, startAt])
+  @@index([memberId, startAt])
+  @@index([githubUserId, startAt, endAt])
+}
+
+model Comment {
+  id String @id @default(uuid())
+  issueId String
+  issue Issue @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  authorId String
+  author RepositoryMember @relation(fields: [authorId], references: [id], onDelete: Restrict)
+  content String
+  mentions CommentMention[]
+  attachments Attachment[]
+  notifications Notification[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([issueId, createdAt])
+}
+
+// Persist delivered recipients even when the mention is removed from the content.
+model CommentMention {
+  id String @id @default(uuid())
+  commentId String
+  comment Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  @@unique([commentId, userId])
+}
+
+model Attachment {
+  id String @id @default(uuid())
+  commentId String
+  comment Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  fileName String
+  mimeType String
+  fileSize Int
+  storageKey String @unique
+  createdAt DateTime @default(now())
+  @@index([commentId])
+}
+
+// M4 only delivers mentions. Other notification groups/preferences/email are M6.
+model Notification {
+  id String @id @default(uuid())
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  repositoryId String
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  issueId String
+  issue Issue @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  commentId String
+  comment Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  type String @default("MENTION")
+  readAt DateTime?
+  createdAt DateTime @default(now())
+  @@unique([commentId, userId])
+  @@index([userId, createdAt])
+}
+
 model IssueStatusHistory {
   id String @id @default(uuid())
   issueId String
@@ -220,7 +305,7 @@ model IssueStatusHistory {
   @@index([issueId, createdAt])
 }
 
-// M3 transactional outbox foundation. Processing and retry policy are M5.
+// Durable outbox. A partial SQL index permits only one active job per issue.
 model SyncJob {
   id String @id @default(uuid())
   repositoryId String
@@ -231,7 +316,25 @@ model SyncJob {
   status String @default("PENDING")
   idempotencyKey String @unique
   createdAt DateTime @default(now())
+  retryCount Int @default(0)
+  nextRetryAt DateTime?
+  lastError String?
+  processedAt DateTime?
+  updatedAt DateTime @default(now()) @updatedAt
   @@index([issueId, status])
+  @@index([status, nextRetryAt])
+  @@index([repositoryId, status])
+}
+
+model WebhookEvent {
+  id String @id @default(uuid())
+  repositoryId String
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  githubDeliveryId String @unique
+  eventType String
+  processedAt DateTime?
+  createdAt DateTime @default(now())
+  @@index([repositoryId, createdAt])
 }
 
 /// Báo cáo tiến độ tuần do LLM viết.

@@ -11,6 +11,7 @@ export interface Env {
   DATABASE_URL: string;
   /** Bật SSL khi nối database (Supabase cần bật, Postgres cài trên máy thì tắt). */
   DATABASE_SSL: boolean;
+  SYNC_WORKER_ENABLED: boolean;
   GITHUB_CLIENT_ID: string;
   GITHUB_CLIENT_SECRET: string;
   GITHUB_WEBHOOK_SECRET: string;
@@ -65,6 +66,8 @@ export function validateEnv(raw: Record<string, unknown>): Env {
     WEBHOOK_URL: required(raw, 'WEBHOOK_URL'),
     DATABASE_URL: required(raw, 'DATABASE_URL'),
     DATABASE_SSL: optional(raw, 'DATABASE_SSL', 'true') !== 'false',
+    SYNC_WORKER_ENABLED:
+      optional(raw, 'SYNC_WORKER_ENABLED', raw.NODE_ENV === 'test' ? 'false' : 'true') !== 'false',
     GITHUB_CLIENT_ID: required(raw, 'GITHUB_CLIENT_ID'),
     GITHUB_CLIENT_SECRET: required(raw, 'GITHUB_CLIENT_SECRET'),
     GITHUB_WEBHOOK_SECRET: required(raw, 'GITHUB_WEBHOOK_SECRET'),

@@ -3,6 +3,7 @@ import { IN_PROGRESS_LABEL } from '../common/constants/issues.js';
 import { deriveStatus } from '../common/utils/issue-status.js';
 import { IssueState, type Issue, type IssueStatus } from '../generated/prisma/client.js';
 import type { GithubIssue } from '../github/github.types.js';
+import { stripSyncMarker } from '../sync/sync.rules.js';
 
 export type IssueLabelData = {
   name: string;
@@ -48,7 +49,7 @@ export function toIssueFields(gh: GithubIssue): IssueFields {
     githubId: BigInt(gh.id),
     number: gh.number,
     title: gh.title,
-    body: gh.body ?? null,
+    body: stripSyncMarker(gh.body),
     state,
     status: deriveStatus(
       state,

@@ -1,4 +1,4 @@
-import { createHmac } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
 import type { INestApplication } from '@nestjs/common';
 import { ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
@@ -58,6 +58,7 @@ const repoAsMember: GithubRepo = {
 /** Database giả lưu trong bộ nhớ, đủ cho các thao tác mà test cần. */
 function createFakePrisma() {
   const issues = new Map<string, Record<string, any>>();
+  const deliveries = new Map<string, unknown>();
   const key = (repoId: string, number: number) => `${repoId}#${number}`;
   const db = {
     user: { findUnique: vi.fn(async () => user) },
@@ -101,7 +102,7 @@ function createFakePrisma() {
       findMany: vi.fn(async () => [...issues.values()]),
       count: vi.fn(async () => 2),
       create: vi.fn(async ({ data }: any) => {
-        const saved = { id: 'issue-id', ...data };
+        const saved = { id: 'issue-id', syncStatus: 'SYNCED', ...data };
         issues.set(key(data.repoId, data.number), saved);
         return saved;
       }),
@@ -128,6 +129,13 @@ function createFakePrisma() {
       groupBy: vi.fn(async () => [{ repoId: 100, _count: { _all: 2 } }]),
     },
     issueStatusHistory: { create: vi.fn(async ({ data }: any) => data) },
+    webhookEvent: {
+      findUnique: vi.fn(async ({ where }: any) => deliveries.get(where.githubDeliveryId) ?? null),
+      create: vi.fn(async ({ data }: any) => {
+        deliveries.set(data.githubDeliveryId, data);
+        return data;
+      }),
+    },
     $executeRaw: vi.fn(async () => 1),
     $queryRaw: vi.fn(async () => []),
   };
@@ -413,6 +421,7 @@ describe('ứng dụng', () => {
         .post('/webhooks/github')
         .set('Content-Type', 'application/json')
         .set('X-GitHub-Event', event)
+        .set('X-GitHub-Delivery', randomUUID())
         .set('X-Hub-Signature-256', signature)
         .send(body);
     };
@@ -462,7 +471,11 @@ describe('ứng dụng', () => {
     });
 
     it('GitHub deletion preserves the local issue and marks it NEEDS_ATTENTION', async () => {
-      await post('issues', { action: 'deleted', issue: githubIssue(), repository: { id: 100 } });
+      await post('issues', {
+        action: 'deleted',
+        issue: githubIssue({ updated_at: '2026-10-04T00:00:00Z' }),
+        repository: { id: 100 },
+      });
       expect(realtime.emitIssueUpdated).toHaveBeenCalledWith(
         '10000000-0000-4000-8000-000000000100',
         expect.objectContaining({ number: 5, syncStatus: 'NEEDS_ATTENTION' }),

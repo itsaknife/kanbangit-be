@@ -32,6 +32,7 @@ import {
   validatePlanning,
 } from './issue.rules.js';
 import type { IssueListQuery } from './dto/issue-list.dto.js';
+import { localIdFromBody } from '../sync/sync.rules.js';
 
 @Injectable()
 export class IssuesService {
@@ -295,6 +296,7 @@ export class IssuesService {
         select: { id: true, parentId: true, estimateMinutes: true },
       });
       const ids = [issue.id, ...descendantIds(nodes, issue.id)];
+      await tx.worklog.deleteMany({ where: { issueId: { in: ids } } });
       const updated: Issue[] = [];
       for (const target of await tx.issue.findMany({ where: { id: { in: ids }, repoId } })) {
         const row = await tx.issue.update({
@@ -337,87 +339,123 @@ export class IssuesService {
     this.embeddings.queueRepo(repository.id);
     return issues.length;
   }
-  async applyWebhook(repoId: string, action: string, gh: GithubIssue) {
+  async applyWebhook(
+    repoId: string,
+    action: string,
+    gh: GithubIssue,
+    transaction?: Prisma.TransactionClient,
+  ) {
     if (gh.pull_request) return;
     // GitHub deletion/transfer must not erase local issue history or its hierarchy.
     if (action === 'deleted' || action === 'transferred') {
-      const issue = await this.prisma.issue.findUnique({
+      const db = transaction ?? this.prisma;
+      const issue = await db.issue.findUnique({
         where: { repoId_number: { repoId, number: gh.number } },
       });
-      if (issue) {
-        const row = await this.prisma.issue.update({
+      if (issue && (!issue.githubUpdatedAt || new Date(gh.updated_at) >= issue.githubUpdatedAt)) {
+        const row = await db.issue.update({
           where: { id: issue.id },
           data: { syncStatus: 'NEEDS_ATTENTION' },
         });
-        this.realtime.emitIssueUpdated(repoId, toIssueDto(row));
+        const result = { row, created: false };
+        if (!transaction) await this.publishGithub(result);
+        return result;
       }
       return;
     }
-    await this.upsertGithub(repoId, gh);
+    return this.upsertGithub(repoId, gh, transaction);
   }
-  private async upsertGithub(repoId: string, gh: GithubIssue) {
-    const result = await this.prisma.$transaction(
-      async (tx) => {
-        await tx.$queryRaw`SELECT id FROM "Repository" WHERE id=${repoId} FOR UPDATE`;
-        const existing = await tx.issue.findUnique({
-          where: { repoId_number: { repoId, number: gh.number } },
-        });
-        const fields = toIssueFields(gh);
-        if (
-          existing &&
-          ((existing.githubUpdatedAt && existing.githubUpdatedAt >= fields.githubUpdatedAt) ||
-            existing.syncStatus === 'PENDING_SYNC')
-        )
-          return null;
-        const status = statusFromGithub(
-          existing?.status,
-          existing?.state ?? null,
-          fields.state,
-        ) as IssueStatus;
-        const assigned = fields.assignees[0]
-          ? await tx.repositoryMember.findFirst({
-              where: {
-                repositoryId: repoId,
-                login: { equals: fields.assignees[0].login, mode: 'insensitive' },
-              },
-            })
-          : null;
-        const row = existing
-          ? await tx.issue.update({
-              where: { id: existing.id },
-              data: {
-                ...fields,
-                status,
-                assigneeId: assigned?.id ?? null,
-                assignees: fields.assignees.slice(0, 1),
-              },
-            })
-          : await tx.issue.create({
-              data: {
-                repoId,
-                ...fields,
-                status,
-                ...(await allocateIssueCode(tx, repoId)),
-                assigneeId: assigned?.id ?? null,
-                assignees: fields.assignees.slice(0, 1),
-              },
-            });
-        if (!existing || status !== existing.status)
-          await tx.issueStatusHistory.create({
+  private async upsertGithub(
+    repoId: string,
+    gh: GithubIssue,
+    transaction?: Prisma.TransactionClient,
+  ) {
+    const write = async (tx: Prisma.TransactionClient) => {
+      await tx.$queryRaw`SELECT id FROM "Repository" WHERE id=${repoId} FOR UPDATE`;
+      let existing = await tx.issue.findUnique({
+        where: { repoId_number: { repoId, number: gh.number } },
+      });
+      // A CREATE webhook may arrive before the worker receives the POST response.
+      // Bind it to the local issue, rather than importing a duplicate row/code.
+      const localId = localIdFromBody(gh.body);
+      if (!existing && localId) {
+        const local = await tx.issue.findFirst({ where: { id: localId, repoId, githubId: null } });
+        if (local)
+          existing = await tx.issue.update({
+            where: { id: local.id },
             data: {
-              issueId: row.id,
-              fromStatus: existing?.status,
-              toStatus: status,
-              source: 'GITHUB_WEBHOOK',
+              githubId: BigInt(gh.id),
+              number: gh.number,
+              htmlUrl: gh.html_url,
+              githubCreatedAt: new Date(gh.created_at),
             },
           });
-        if (existing && (existing.title !== row.title || existing.body !== row.body))
-          await tx.$executeRaw`UPDATE "Issue" SET embedding=NULL WHERE id=${row.id}`;
-        return { row, created: !existing };
-      },
-      { timeout: 30000 },
-    );
+      }
+      const fields = toIssueFields(gh);
+      if (
+        existing &&
+        ((existing.githubUpdatedAt && existing.githubUpdatedAt >= fields.githubUpdatedAt) ||
+          existing.syncStatus !== 'SYNCED')
+      )
+        return null;
+      const status = statusFromGithub(
+        existing?.status,
+        existing?.state ?? null,
+        fields.state,
+      ) as IssueStatus;
+      const assigned = fields.assignees[0]
+        ? await tx.repositoryMember.findFirst({
+            where: {
+              repositoryId: repoId,
+              login: { equals: fields.assignees[0].login, mode: 'insensitive' },
+            },
+          })
+        : null;
+      const row = existing
+        ? await tx.issue.update({
+            where: { id: existing.id },
+            data: {
+              ...fields,
+              status,
+              assigneeId: assigned?.id ?? null,
+              assignees: fields.assignees.slice(0, 1),
+              lastSyncedAt: new Date(),
+            },
+          })
+        : await tx.issue.create({
+            data: {
+              repoId,
+              ...fields,
+              status,
+              ...(await allocateIssueCode(tx, repoId)),
+              assigneeId: assigned?.id ?? null,
+              assignees: fields.assignees.slice(0, 1),
+              lastSyncedAt: new Date(),
+            },
+          });
+      if (!existing || status !== existing.status)
+        await tx.issueStatusHistory.create({
+          data: {
+            issueId: row.id,
+            fromStatus: existing?.status,
+            toStatus: status,
+            source: 'GITHUB_WEBHOOK',
+          },
+        });
+      if (existing && (existing.title !== row.title || existing.body !== row.body))
+        await tx.$executeRaw`UPDATE "Issue" SET embedding=NULL WHERE id=${row.id}`;
+      return { row, created: !existing };
+    };
+    const result = transaction
+      ? await write(transaction)
+      : await this.prisma.$transaction(write, { timeout: 30000 });
+    if (!transaction) await this.publishGithub(result);
+    return result;
+  }
+
+  async publishGithub(result: { row: Issue; created: boolean } | null | undefined) {
     if (!result) return;
+    const repoId = result.row.repoId;
     const graph = await this.prisma.issue.findMany({
       where: { repoId },
       select: { id: true, parentId: true, estimateMinutes: true },
@@ -472,7 +510,13 @@ export class IssuesService {
     };
   }
   private async queue(tx: Prisma.TransactionClient, issue: Issue) {
-    if (await tx.syncJob.findFirst({ where: { issueId: issue.id, status: 'PENDING' } })) return;
+    await tx.issue.update({ where: { id: issue.id }, data: { syncVersion: { increment: 1 } } });
+    if (
+      await tx.syncJob.findFirst({
+        where: { issueId: issue.id, status: { in: ['PENDING', 'PROCESSING', 'RETRY_WAIT'] } },
+      })
+    )
+      return;
     await tx.syncJob.create({
       data: {
         repositoryId: issue.repoId,

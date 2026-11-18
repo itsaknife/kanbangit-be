@@ -101,6 +101,12 @@ describe.skipIf(process.env.RUN_M6_DB_TESTS !== '1')(
         true
       >;
       identity = new IdentityService(prisma, config);
+      // This migration fixture has no live provider token. Model reauthentication
+      // of the legacy account; unverified legacy metadata is tested separately.
+      await db.authIdentity.updateMany({
+        where: { providerUserId: '77' },
+        data: { email: 'legacy@example.test', emailVerified: true },
+      });
       const access = new AccessService(github, prisma);
       issues = new IssuesService(prisma, github, access, realtime, {
         queueRepo: vi.fn(),
@@ -139,7 +145,7 @@ describe.skipIf(process.env.RUN_M6_DB_TESTS !== '1')(
       );
       await expect(
         identity.resolve(account('different', 'owner@example.test', 'GITHUB')),
-      ).rejects.toThrow('ACCOUNT_LINK_REQUIRED');
+      ).rejects.toThrow('ACCOUNT_EXISTS_WITH_DIFFERENT_PROVIDER');
     });
     it('links explicitly, prevents takeover and prevents unlinking the last provider', async () => {
       await identity.resolve(account('88', 'owner@example.test', 'GITHUB'), owner.id);
@@ -148,7 +154,7 @@ describe.skipIf(process.env.RUN_M6_DB_TESTS !== '1')(
       );
       await expect(
         identity.resolve(account('77', 'other@example.test', 'GITHUB'), owner.id),
-      ).rejects.toThrow('IDENTITY_ALREADY_LINKED');
+      ).rejects.toThrow('IDENTITY_OWNED_BY_ANOTHER_USER');
       await identity.unlink(owner, 'GITHUB');
       await expect(identity.unlink(owner, 'GOOGLE')).rejects.toThrow();
     });
@@ -228,6 +234,21 @@ describe.skipIf(process.env.RUN_M6_DB_TESTS !== '1')(
       await expect(
         db.issue.update({ where: { id: issueId }, data: { number: 1 } }),
       ).rejects.toThrow();
+    });
+    it('permits only one of two Users to link the same identity concurrently', async () => {
+      const a = await identity.resolve(account('801', 'a-link@example.test', 'GITHUB'));
+      const b = await identity.resolve(account('802', 'b-link@example.test', 'GITHUB'));
+      const shared = account('shared-google', 'shared@example.test');
+      const results = await Promise.allSettled([
+        identity.resolve(shared, a.id),
+        identity.resolve(shared, b.id),
+      ]);
+      expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+      expect(
+        await db.authIdentity.count({
+          where: { provider: 'GOOGLE', providerUserId: 'shared-google' },
+        }),
+      ).toBe(1);
     });
     it('serializes concurrent first logins to one internal account', async () => {
       const result = await Promise.all([

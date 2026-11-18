@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
 import { Octokit } from 'octokit';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { encrypt } from '../common/utils/crypto.js';
+import { decrypt, encrypt } from '../common/utils/crypto.js';
 import type { AuthProvider, User } from '../generated/prisma/client.js';
 import type { Env } from '../config/env.js';
 
@@ -119,62 +119,139 @@ export class IdentityService {
     return account;
   }
   async resolve(a: ProviderAccount, linkUserId?: string) {
-    return this.prisma.$transaction(async (tx) => {
-      // Serialize email collision checks and simultaneous links/unlinks.
-      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended('kanbangit-identities',0))::text`;
-      const existing = await tx.authIdentity.findUnique({
+    // Migrated GitHub identities may not have an email yet. Perform provider I/O
+    // before opening a DB transaction; never infer ownership from a public email.
+    const legacyEmails = new Map<string, { token: string | null; emails: string[] | null }>();
+    if (!linkUserId && a.emailVerified && a.email) {
+      const existing = await this.prisma.authIdentity.findUnique({
         where: {
           provider_providerUserId: { provider: a.provider, providerUserId: a.providerUserId },
         },
       });
-      if (existing && linkUserId && existing.userId !== linkUserId)
-        throw new ConflictException('IDENTITY_ALREADY_LINKED');
-      let userId = linkUserId ?? existing?.userId;
-      if (!userId) {
+      if (!existing) {
         if (
-          a.emailVerified &&
-          a.email &&
-          (await tx.authIdentity.findFirst({
+          await this.prisma.authIdentity.findFirst({
             where: { email: { equals: a.email, mode: 'insensitive' }, emailVerified: true },
-          }))
+          })
         )
-          throw new ConflictException('ACCOUNT_LINK_REQUIRED');
-        const user = await tx.user.create({
-          data: { login: `user-${randomUUID()}`, name: a.name, avatarUrl: a.avatarUrl },
+          throw new ConflictException('ACCOUNT_EXISTS_WITH_DIFFERENT_PROVIDER');
+        const legacy = await this.prisma.authIdentity.findMany({
+          where: { provider: 'GITHUB', OR: [{ email: null }, { emailVerified: false }] },
+          take: 20,
         });
-        userId = user.id;
+        await Promise.all(
+          legacy.map(async (identity) => {
+            legacyEmails.set(identity.id, {
+              token: identity.accessToken,
+              emails: await this.legacyVerifiedEmails(identity),
+            });
+          }),
+        );
       }
-      const occupied = await tx.authIdentity.findUnique({
-        where: { userId_provider: { userId, provider: a.provider } },
+    }
+    return this.prisma.$transaction(
+      async (tx) => {
+        // Serialize email collision checks and simultaneous links/unlinks.
+        await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended('kanbangit-identities',0))::text`;
+        const existing = await tx.authIdentity.findUnique({
+          where: {
+            provider_providerUserId: { provider: a.provider, providerUserId: a.providerUserId },
+          },
+        });
+        if (existing && linkUserId && existing.userId !== linkUserId)
+          throw new ConflictException('IDENTITY_OWNED_BY_ANOTHER_USER');
+        let userId = linkUserId ?? existing?.userId;
+        if (!userId) {
+          if (
+            a.emailVerified &&
+            a.email &&
+            (await tx.authIdentity.findFirst({
+              where: { email: { equals: a.email, mode: 'insensitive' }, emailVerified: true },
+            }))
+          )
+            throw new ConflictException('ACCOUNT_EXISTS_WITH_DIFFERENT_PROVIDER');
+          if (a.emailVerified && a.email) {
+            const legacy = await tx.authIdentity.findMany({
+              where: { provider: 'GITHUB', OR: [{ email: null }, { emailVerified: false }] },
+            });
+            for (const identity of legacy) {
+              const checked = legacyEmails.get(identity.id);
+              if (!checked || checked.token !== identity.accessToken || checked.emails === null) {
+                continue;
+              }
+              if (
+                checked.emails.some(
+                  (email) => email.toLowerCase() === a.email!.trim().toLowerCase(),
+                )
+              )
+                throw new ConflictException('ACCOUNT_EXISTS_WITH_DIFFERENT_PROVIDER');
+            }
+            // Missing metadata or another person's expired credential is not
+            // evidence that this verified email is already registered.
+          }
+          const user = await tx.user.create({
+            data: { login: `user-${randomUUID()}`, name: a.name, avatarUrl: a.avatarUrl },
+          });
+          userId = user.id;
+        }
+        const occupied = await tx.authIdentity.findUnique({
+          where: { userId_provider: { userId, provider: a.provider } },
+        });
+        if (occupied && occupied.providerUserId !== a.providerUserId)
+          throw new ConflictException('PROVIDER_ALREADY_LINKED');
+        const { name: _name, avatarUrl: _avatar, ...fields } = a;
+        await tx.authIdentity.upsert({
+          where: {
+            provider_providerUserId: { provider: a.provider, providerUserId: a.providerUserId },
+          },
+          create: { ...fields, userId },
+          update: fields,
+        });
+        if (a.provider === 'GITHUB') {
+          await tx.user.update({
+            where: { id: userId },
+            data: { githubId: BigInt(a.providerUserId) },
+          });
+          await tx.repositoryMember.updateMany({
+            where: { githubUserId: BigInt(a.providerUserId) },
+            data: { userId },
+          });
+          // Owner-entered historical worklogs may predate this person's first login.
+          // Reconcile their overlap key when the GitHub identity becomes linked.
+          await tx.worklog.updateMany({
+            where: { githubUserId: BigInt(a.providerUserId), personKey: { not: userId } },
+            data: { personKey: userId },
+          });
+        }
+        return tx.user.findUniqueOrThrow({ where: { id: userId } });
+      },
+      { timeout: 30000 },
+    );
+  }
+  private async legacyVerifiedEmails(identity: {
+    providerUserId: string;
+    accessToken: string | null;
+  }): Promise<string[] | null> {
+    if (!identity.accessToken) return null;
+    try {
+      const client = new Octokit({
+        auth: decrypt(
+          identity.accessToken,
+          this.config.get('TOKEN_ENCRYPTION_KEY', { infer: true }),
+        ),
+        request: { timeout: 5000 },
+        retry: { enabled: false },
+        throttle: { enabled: false },
       });
-      if (occupied && occupied.providerUserId !== a.providerUserId)
-        throw new ConflictException('PROVIDER_ALREADY_LINKED');
-      const { name: _name, avatarUrl: _avatar, ...fields } = a;
-      await tx.authIdentity.upsert({
-        where: {
-          provider_providerUserId: { provider: a.provider, providerUserId: a.providerUserId },
-        },
-        create: { ...fields, userId },
-        update: fields,
-      });
-      if (a.provider === 'GITHUB') {
-        await tx.user.update({
-          where: { id: userId },
-          data: { githubId: BigInt(a.providerUserId) },
-        });
-        await tx.repositoryMember.updateMany({
-          where: { githubUserId: BigInt(a.providerUserId) },
-          data: { userId },
-        });
-        // Owner-entered historical worklogs may predate this person's first login.
-        // Reconcile their overlap key when the GitHub identity becomes linked.
-        await tx.worklog.updateMany({
-          where: { githubUserId: BigInt(a.providerUserId), personKey: { not: userId } },
-          data: { personKey: userId },
-        });
-      }
-      return tx.user.findUniqueOrThrow({ where: { id: userId } });
-    });
+      const [{ data: user }, { data: emails }] = await Promise.all([
+        client.rest.users.getAuthenticated(),
+        client.rest.users.listEmailsForAuthenticatedUser(),
+      ]);
+      if (String(user.id) !== identity.providerUserId) return null;
+      return emails.filter((email) => email.verified).map((email) => email.email);
+    } catch {
+      return null;
+    }
   }
   list(user: User) {
     return this.prisma.authIdentity.findMany({

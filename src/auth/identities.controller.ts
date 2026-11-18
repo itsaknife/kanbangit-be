@@ -1,4 +1,7 @@
-import { Controller, Get, Post, Delete, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Param, Req, UseGuards } from '@nestjs/common';
+import type { Request } from 'express';
+import { SESSION_COOKIE } from '../common/types/request.js';
+import { oauthSessionHash } from './oauth-state.js';
 import { randomBytes } from 'node:crypto';
 import { CurrentUser } from '../common/decorators/current-user.decorator.js';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard.js';
@@ -15,10 +18,20 @@ export class IdentitiesController {
   @Get() list(@CurrentUser() user: User) {
     return this.identities.list(user);
   }
-  @Post(':provider/link') async link(@CurrentUser() user: User, @Param('provider') value: string) {
+  @Post(':provider/link') async link(
+    @CurrentUser() user: User,
+    @Param('provider') value: string,
+    @Req() req: Request,
+  ) {
     const provider = this.identities.provider(value);
     const state = await this.jwt.signAsync(
-      { purpose: 'link', provider, userId: user.id, nonce: randomBytes(32).toString('hex') },
+      {
+        purpose: 'link',
+        provider,
+        userId: user.id,
+        sessionHash: oauthSessionHash(req.cookies?.[SESSION_COOKIE]),
+        nonce: randomBytes(32).toString('hex'),
+      },
       { expiresIn: '10m' },
     );
     // The start endpoint binds this signed, session-specific request to an HttpOnly state cookie.

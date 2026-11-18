@@ -11,6 +11,7 @@ import type { User, AuthProvider } from '../generated/prisma/client.js';
 import { SessionService } from './session.service.js';
 import { IdentityService } from './identity.service.js';
 import { publicProfile } from './profile.controller.js';
+import { oauthSessionHash } from './oauth-state.js';
 @Controller('auth')
 export class ProjectAuthController {
   constructor(
@@ -28,21 +29,29 @@ export class ProjectAuthController {
   private async start(provider: AuthProvider, req: Request, res: Response, link?: string) {
     let state = randomBytes(32).toString('hex');
     if (link) {
-      const payload = await this.jwt.verifyAsync<{
-        purpose: string;
-        provider: AuthProvider;
-        userId: string;
-      }>(link);
-      const user = await this.session.verify(req.cookies?.[SESSION_COOKIE]);
-      if (
-        payload.purpose !== 'link' ||
-        payload.provider !== provider ||
-        payload.userId !== user?.id
-      ) {
+      try {
+        const payload = await this.jwt.verifyAsync<{
+          purpose: string;
+          provider: AuthProvider;
+          userId: string;
+          sessionHash: string;
+        }>(link);
+        const user = await this.session.verify(req.cookies?.[SESSION_COOKIE]);
+        if (
+          payload.purpose !== 'link' ||
+          payload.provider !== provider ||
+          payload.userId !== user?.id ||
+          !payload.sessionHash ||
+          payload.sessionHash !== oauthSessionHash(req.cookies?.[SESSION_COOKIE])
+        ) {
+          res.redirect(`${this.frontend()}/settings?error=invalid_state`);
+          return;
+        }
+        state = link;
+      } catch {
         res.redirect(`${this.frontend()}/settings?error=invalid_state`);
         return;
       }
-      state = link;
     }
     const url = this.identities.authorize(provider, state);
     res.cookie(`oauth_${provider}`, state, { ...this.cookies(), maxAge: 600000 });
@@ -58,20 +67,32 @@ export class ProjectAuthController {
     const { code, state } = req.query;
     const expected = req.cookies?.[`oauth_${provider}`];
     res.clearCookie(`oauth_${provider}`, this.cookies());
-    let target = '/login';
+    let target = typeof expected === 'string' && expected.includes('.') ? '/settings' : '/login';
     try {
       if (typeof code !== 'string' || typeof state !== 'string' || !expected || state !== expected)
         throw Error('invalid_state');
       let linkUserId: string | undefined;
       if (state.includes('.')) {
         target = '/settings';
-        const p = await this.jwt.verifyAsync<{
-          purpose: string;
-          provider: AuthProvider;
-          userId: string;
-        }>(state);
+        const p = await this.jwt
+          .verifyAsync<{
+            purpose: string;
+            provider: AuthProvider;
+            userId: string;
+            sessionHash: string;
+          }>(state)
+          .catch(() => {
+            throw Error('invalid_state');
+          });
         const user = await this.session.verify(req.cookies?.[SESSION_COOKIE]);
-        if (p.purpose !== 'link' || p.provider !== provider || !user || p.userId !== user.id)
+        if (
+          p.purpose !== 'link' ||
+          p.provider !== provider ||
+          !user ||
+          p.userId !== user.id ||
+          !p.sessionHash ||
+          p.sessionHash !== oauthSessionHash(req.cookies?.[SESSION_COOKIE])
+        )
           throw Error('invalid_state');
         linkUserId = user.id;
       }
@@ -83,12 +104,17 @@ export class ProjectAuthController {
         ...this.cookies(),
         maxAge: 7 * 86400000,
       });
-      res.redirect(`${this.frontend()}${linkUserId ? '/settings' : '/projects'}`);
+      res.redirect(
+        `${this.frontend()}${linkUserId ? '/settings?result=ACCOUNT_LINK_SUCCESS' : '/projects'}`,
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : '';
       const reason = [
         'ACCOUNT_LINK_REQUIRED',
+        'ACCOUNT_EXISTS_WITH_DIFFERENT_PROVIDER',
+        'ACCOUNT_EMAIL_VERIFICATION_REQUIRED',
         'IDENTITY_ALREADY_LINKED',
+        'IDENTITY_OWNED_BY_ANOTHER_USER',
         'PROVIDER_ALREADY_LINKED',
         'invalid_state',
       ].includes(message)

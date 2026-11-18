@@ -13,7 +13,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard.js';
 import type { User } from '../generated/prisma/client.js';
 import { ActiveTrackerDto, CreateTrackerDto, UpdateTrackerDto } from './tracker.dto.js';
 import { TrackersService } from './trackers.service.js';
-@Controller('repositories/:repoId/trackers')
+@Controller(['projects/:repoId/trackers', 'repositories/:repoId/trackers'])
 @UseGuards(JwtAuthGuard)
 export class TrackersController {
   constructor(private readonly trackers: TrackersService) {}

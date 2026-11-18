@@ -61,6 +61,7 @@ export class SyncWorker implements OnModuleInit, OnModuleDestroy {
   async drain() {
     const jobs = await this.prisma.syncJob.findMany({
       where: {
+        repository:{providerType:'GITHUB'},
         OR: [
           { status: { in: ['PENDING', 'PROCESSING'] } },
           { status: 'RETRY_WAIT', nextRetryAt: { lte: new Date() } },
@@ -151,6 +152,7 @@ export class SyncWorker implements OnModuleInit, OnModuleDestroy {
     if (!claim || !ownsLock()) return;
     const { job, issue, repository, user } = claim;
     try {
+      if (repository.providerType !== 'GITHUB' || !repository.owner) throw Object.assign(new Error('Invalid provider'), {status:422});
       if (!user) throw Object.assign(new Error('No active connector'), { status: 403 });
       await this.github.requireWrite(user, repository.owner, repository.name);
       let number = issue.number;

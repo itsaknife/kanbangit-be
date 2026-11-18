@@ -296,7 +296,7 @@ describe.skipIf(process.env.RUN_M2_DB_TESTS !== '1')(
       );
       const target = await prisma.repositoryMember.findUniqueOrThrow({
         where: {
-          repositoryId_githubUserId: { repositoryId: repoId, githubUserId: member.githubId },
+          repositoryId_githubUserId: { repositoryId: repoId, githubUserId: member.githubId! },
         },
       });
       await repositories.transferOwner(owner, repoId, target.id);

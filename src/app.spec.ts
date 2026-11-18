@@ -62,6 +62,7 @@ function createFakePrisma() {
   const key = (repoId: string, number: number) => `${repoId}#${number}`;
   const db = {
     user: { findUnique: vi.fn(async () => user) },
+    authIdentity: {findMany:vi.fn(async()=>[])},
     repositoryMember: {
       findFirst: vi.fn(async () => null),
       findUnique: vi.fn(async () => ({ role: 'MEMBER', isActive: true, userId: user.id })),
@@ -220,17 +221,18 @@ describe('ứng dụng', () => {
         avatarUrl: 'https://a/huy.png',
         displayName: null,
         customAvatarUrl: null,
+        identities: [],
       });
     });
 
-    it('rejects a valid local session when GitHub has revoked its token', async () => {
+    it('keeps the local session usable when a separate GitHub credential is revoked', async () => {
       getAuthenticated.mockRejectedValueOnce(
         new RequestError('Bad credentials', 401, {
           request: { method: 'GET', url: 'https://api.github.com/user', headers: {} },
         }),
       );
       const res = await request(app.getHttpServer()).get('/auth/me').set('Cookie', cookie);
-      expect(res.status).toBe(401);
+      expect(res.status).toBe(200);
     });
 
     it('keeps a valid local session usable during GitHub outages', async () => {
@@ -249,7 +251,7 @@ describe('ứng dụng', () => {
       expect(res.status).toBe(302);
       expect(res.headers.location).toContain('https://github.com/login/oauth/authorize');
       expect(res.headers.location).toContain('scope=repo+read%3Auser');
-      expect(res.headers['set-cookie']?.[0]).toContain('oauth_state=');
+      expect(res.headers['set-cookie']?.[0]).toContain('oauth_GITHUB=');
     });
 
     it('callback có state sai thì quay về trang login, không đăng nhập', async () => {

@@ -18,7 +18,7 @@ export class AccessService {
     const connected = await this.prisma.repository.findUnique({ where: { id: repoId } });
     if (!connected) throw new NotFoundException('Không tìm thấy repository');
     const member = await this.prisma.repositoryMember.findUnique({
-      where: { repositoryId_githubUserId: { repositoryId: repoId, githubUserId: user.githubId } },
+      where: { repositoryId_userId: { repositoryId: repoId, userId: user.id } },
     });
     if (!member?.isActive || member.userId !== user.id)
       throw new ForbiddenException('Bạn không có membership hoạt động trong repository');
@@ -28,10 +28,10 @@ export class AccessService {
       github: {
         id: Number(connected.githubId),
         name: connected.name,
-        owner: connected.owner,
+        owner: connected.owner ?? '',
         fullName: connected.fullName,
         description: connected.description,
-        isPrivate: connected.isPrivate,
+        isPrivate: connected.isPrivate ?? false,
         openIssuesCount: 0,
         canManage: member.role === 'OWNER',
       },
@@ -57,7 +57,7 @@ export class AccessService {
     return this.prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM "Repository" WHERE id=${repoId} FOR UPDATE`;
       const member = await tx.repositoryMember.findUnique({
-        where: { repositoryId_githubUserId: { repositoryId: repoId, githubUserId: user.githubId } },
+        where: { repositoryId_userId: { repositoryId: repoId, userId: user.id } },
       });
       if (!member?.isActive || member.userId !== user.id || member.role !== 'OWNER')
         throw new ForbiddenException('Chỉ Owner đang hoạt động được thực hiện thao tác này');

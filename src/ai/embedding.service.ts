@@ -61,7 +61,7 @@ export class EmbeddingService {
     for (;;) {
       const pending = await this.prisma.$queryRaw<PendingIssue[]>`
         SELECT id, title, body FROM "Issue"
-        WHERE "repoId" = ${repoId} AND embedding IS NULL
+        WHERE "projectId" = ${repoId} AND embedding IS NULL
         ORDER BY id LIMIT ${BATCH_SIZE}`;
       if (pending.length === 0) return;
 

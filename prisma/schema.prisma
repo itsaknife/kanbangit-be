@@ -16,17 +16,18 @@ datasource db {
 model User {
   id          String   @id @default(uuid())
   legacyId    Int?     @unique
-  githubId    BigInt   @unique
+  githubId    BigInt?   @unique
   login       String   @unique
   name        String?
   avatarUrl   String
   displayName String?
   customAvatarUrl String?
   /// Token GitHub đã mã hóa (AES-256-GCM), dùng để gọi GitHub thay mặt người dùng.
-  accessToken String
+  accessToken String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  identities AuthIdentity[]
   connectedRepositories Repository[]
   weeklySummaries       WeeklySummary[]
   memberships           RepositoryMember[]
@@ -35,15 +36,40 @@ model User {
 }
 
 /// Repository đã kết nối; UUID nội bộ độc lập với githubId.
+enum ProjectProvider {
+ GITHUB
+ KANBANGIT
+}
+enum AuthProvider {
+ GOOGLE
+ GITHUB
+}
+model AuthIdentity {
+ id String @id @default(uuid())
+ userId String
+ user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+ provider AuthProvider
+ providerUserId String
+ email String?
+ emailVerified Boolean @default(false)
+ login String?
+ accessToken String?
+ createdAt DateTime @default(now())
+ updatedAt DateTime @updatedAt
+ @@unique([provider, providerUserId])
+ @@unique([userId, provider])
+ @@index([email])
+}
 model Repository {
+ providerType ProjectProvider @default(GITHUB)
   id            String   @id @default(uuid())
   legacyId      Int?     @unique
-  githubId      BigInt   @unique
+  githubId      BigInt?   @unique
   name          String
-  owner         String
-  fullName      String   @unique
+  owner         String?
+  fullName      String
   description   String?
-  isPrivate     Boolean
+  isPrivate     Boolean?
   /// Id webhook đã đăng ký trên GitHub (để biết đã đăng ký chưa).
   webhookId     BigInt?
   connectedById String
@@ -77,9 +103,9 @@ enum GithubPermission {
 
 model RepositoryMember {
   id               String @id @default(uuid())
-  repositoryId     String
+  repositoryId     String @map("projectId")
   repository       Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
-  githubUserId     BigInt
+  githubUserId     BigInt?
   login            String
   avatarUrl        String?
   githubPermission GithubPermission @default(UNKNOWN)
@@ -94,6 +120,7 @@ model RepositoryMember {
   worklogs Worklog[]
   comments Comment[]
 
+  @@unique([repositoryId, userId])
   @@unique([repositoryId, githubUserId])
   @@unique([id, repositoryId])
   @@index([repositoryId, login])
@@ -102,7 +129,7 @@ model RepositoryMember {
 
 model Tracker {
   id           String @id @default(uuid())
-  repositoryId String
+  repositoryId String @map("projectId")
   repository   Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
   name         String
   prefix       String
@@ -123,7 +150,7 @@ model Tracker {
 
 model TrackerPrefix {
   id           String @id @default(uuid())
-  repositoryId String
+  repositoryId String @map("projectId")
   repository   Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
   trackerId    String
   tracker      Tracker @relation(fields: [trackerId], references: [id], onDelete: Cascade)
@@ -161,7 +188,7 @@ model Issue {
   id           String      @id @default(uuid())
   legacyId     Int?        @unique
   githubId     BigInt?
-  repoId       String
+  repoId       String @map("projectId")
   repository   Repository  @relation(fields: [repoId], references: [id], onDelete: Cascade)
   number       Int?
   issueCode    String
@@ -219,12 +246,13 @@ model Issue {
 }
 
 model Worklog {
+ personKey String @default("")
   id String @id @default(uuid())
   issueId String
   issue Issue @relation(fields: [issueId], references: [id], onDelete: Cascade)
   memberId String
   member RepositoryMember @relation(fields: [memberId], references: [id], onDelete: Restrict)
-  githubUserId BigInt
+  githubUserId BigInt?
   startAt DateTime @db.Timestamptz(3)
   endAt DateTime @db.Timestamptz(3)
   durationMinutes Float
@@ -279,7 +307,7 @@ model Notification {
   id String @id @default(uuid())
   userId String
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-  repositoryId String
+  repositoryId String @map("projectId")
   repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
   issueId String
   issue Issue @relation(fields: [issueId], references: [id], onDelete: Cascade)
@@ -308,7 +336,7 @@ model IssueStatusHistory {
 // Durable outbox. A partial SQL index permits only one active job per issue.
 model SyncJob {
   id String @id @default(uuid())
-  repositoryId String
+  repositoryId String @map("projectId")
   repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
   issueId String
   issue Issue @relation(fields: [issueId], references: [id], onDelete: Cascade)
@@ -328,7 +356,7 @@ model SyncJob {
 
 model WebhookEvent {
   id String @id @default(uuid())
-  repositoryId String
+  repositoryId String @map("projectId")
   repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
   githubDeliveryId String @unique
   eventType String
@@ -341,7 +369,7 @@ model WebhookEvent {
 model WeeklySummary {
   id          String     @id @default(uuid())
   legacyId    Int?       @unique
-  repoId      String
+  repoId      String @map("projectId")
   repository  Repository @relation(fields: [repoId], references: [id], onDelete: Cascade)
   weekStart   String     // yyyy-MM-dd (thứ Hai)
   weekEnd     String     // yyyy-MM-dd (Chủ nhật)

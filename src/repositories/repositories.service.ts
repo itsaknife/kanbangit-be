@@ -20,7 +20,7 @@ export class RepositoriesService {
     private readonly access: AccessService,
     private readonly issues: IssuesService,
     private readonly members: MembersService,
-  ) {}
+  ) { }
   async list(user: User) {
     const repos = await this.prisma.repository.findMany({
       where: { members: { some: { userId: user.id, isActive: true } } },
@@ -36,7 +36,7 @@ export class RepositoriesService {
       where: { githubId: { in: repos.map((repo) => BigInt(repo.id)) } },
       select: { githubId: true },
     });
-    const ids = new Set(existing.map((repo) => repo.githubId.toString()));
+    const ids = new Set(existing.map((repo) => repo.githubId?.toString()));
     return repos
       .filter((repo) => !ids.has(String(repo.id)))
       .map(({ id, ...repo }) => ({ ...repo, githubId: String(id) }));
@@ -46,7 +46,8 @@ export class RepositoriesService {
     const openIssuesCount = await this.prisma.issue.count({ where: { repoId, state: 'open' } });
     return {
       id: connected.id,
-      githubId: connected.githubId.toString(),
+      githubId: connected.githubId?.toString() ?? null,
+      providerType: connected.providerType,
       name: connected.name,
       owner: connected.owner,
       fullName: connected.fullName,
@@ -109,6 +110,7 @@ export class RepositoriesService {
   }
   async connect(user: User, repoId: string) {
     const { connected } = await this.access.requireConnectedOwner(user, repoId);
+    if (connected.providerType !== 'GITHUB') throw new BadRequestException('Project local không đồng bộ GitHub');
     const github = (await this.github.listRepos(user, true)).find(
       (repo) => BigInt(repo.id) === connected.githubId,
     );
@@ -127,8 +129,8 @@ export class RepositoriesService {
           update: {},
         });
     });
-    await this.github.ensureLabels(user, repository.owner, repository.name);
-    const webhookId = await this.github.ensureWebhook(user, repository.owner, repository.name);
+    await this.github.ensureLabels(user, repository.owner!, repository.name);
+    const webhookId = await this.github.ensureWebhook(user, repository.owner!, repository.name);
     await this.prisma.repository.update({
       where: { id: repository.id },
       data: { webhookId: BigInt(webhookId) },
@@ -159,6 +161,7 @@ export class RepositoriesService {
   }
   async syncMembers(user: User, repoId: string) {
     const { connected } = await this.access.requireConnectedOwner(user, repoId);
+    if (connected.providerType !== 'GITHUB') throw new BadRequestException('Project local không đồng bộ GitHub');
     return this.members.sync(user, connected);
   }
   async transferOwner(user: User, repoId: string, memberId: string) {

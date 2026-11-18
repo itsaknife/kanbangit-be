@@ -74,7 +74,7 @@ export class DuplicateService {
     const rows = await this.prisma.$queryRaw<CandidateRow[]>`
       SELECT id, number, title, body, 1 - (embedding <=> ${literal}::vector) AS similarity
       FROM "Issue"
-      WHERE "repoId" = ${repoId} AND embedding IS NOT NULL
+      WHERE "projectId" = ${repoId} AND embedding IS NOT NULL
       ORDER BY embedding <=> ${literal}::vector
       LIMIT ${CANDIDATE_LIMIT}`;
 

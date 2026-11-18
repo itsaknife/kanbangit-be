@@ -117,7 +117,7 @@ export class IssuesService {
         await tx.$queryRaw`SELECT id FROM "Repository" WHERE id=${repoId} FOR UPDATE`;
         const member = await tx.repositoryMember.findUnique({
           where: {
-            repositoryId_githubUserId: { repositoryId: repoId, githubUserId: user.githubId },
+            repositoryId_userId: { repositoryId: repoId, userId: user.id },
           },
         });
         if (!member?.isActive || member.userId !== user.id)
@@ -333,7 +333,8 @@ export class IssuesService {
     };
   }
 
-  async backfill(user: User, repository: Pick<Repository, 'id' | 'owner' | 'name'>) {
+  async backfill(user: User, repository: Pick<Repository, 'id' | 'owner' | 'name' | 'providerType'>) {
+    if(repository.providerType !== 'GITHUB' || !repository.owner) throw new BadRequestException('Project local không có GitHub');
     const issues = await this.github.listIssues(user, repository.owner, repository.name);
     for (const gh of issues) await this.upsertGithub(repository.id, gh);
     this.embeddings.queueRepo(repository.id);
@@ -510,6 +511,11 @@ export class IssuesService {
     };
   }
   private async queue(tx: Prisma.TransactionClient, issue: Issue) {
+    const project = await tx.repository.findUniqueOrThrow({where:{id:issue.repoId}});
+    if(project.providerType === 'KANBANGIT') {
+      await tx.issue.update({where:{id:issue.id},data:{syncStatus:'SYNCED'}});
+      return;
+    }
     await tx.issue.update({ where: { id: issue.id }, data: { syncVersion: { increment: 1 } } });
     if (
       await tx.syncJob.findFirst({

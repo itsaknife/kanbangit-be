@@ -19,7 +19,7 @@ export class CollaborationAccess {
         if (!repositories.length) throw new NotFoundException('Không tìm thấy repository');
         const member = await tx.repositoryMember.findUnique({
           where: {
-            repositoryId_githubUserId: { repositoryId: repoId, githubUserId: user.githubId },
+            repositoryId_userId: { repositoryId: repoId, userId: user.id },
           },
         });
         if (!member?.isActive || member.userId !== user.id)

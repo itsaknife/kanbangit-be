@@ -15,7 +15,7 @@ import { DuplicateCheckDto } from './dto/duplicate-check.dto.js';
 import { GenerateSummaryDto } from './dto/generate-summary.dto.js';
 import { WeeklySummaryService } from './weekly-summary.service.js';
 
-@Controller('repositories/:repoId/ai')
+@Controller(['projects/:repoId/ai', 'repositories/:repoId/ai'])
 @UseGuards(JwtAuthGuard)
 export class AiController {
   constructor(

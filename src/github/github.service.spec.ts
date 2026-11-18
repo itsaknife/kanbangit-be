@@ -30,9 +30,9 @@ describe('GitHub personal integration requests', () => {
       },
       paginate,
     };
-    const service = new GithubService(new ConfigService({}) as ConfigService<Env, true>);
-    vi.spyOn(service, 'client').mockReturnValue(
-      client as unknown as ReturnType<GithubService['client']>,
+    const service = new GithubService(new ConfigService({}) as ConfigService<Env, true>, {} as never);
+    vi.spyOn(service, 'client').mockResolvedValue(
+      client as unknown as Awaited<ReturnType<GithubService['client']>>,
     );
     return {
       service,

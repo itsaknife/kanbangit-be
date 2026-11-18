@@ -1,3 +1,4 @@
+import { ProjectsController, GithubProjectsController } from './projects.controller.js';
 import { Module } from '@nestjs/common';
 import { AccessModule } from '../access/access.module.js';
 import { AuthModule } from '../auth/auth.module.js';
@@ -10,7 +11,7 @@ import { RealtimeModule } from '../realtime/realtime.module.js';
 
 @Module({
   imports: [AuthModule, AccessModule, GithubModule, IssuesModule, RealtimeModule],
-  controllers: [RepositoriesController],
+  controllers: [RepositoriesController, ProjectsController, GithubProjectsController],
   providers: [RepositoriesService, MembersService],
 })
 export class RepositoriesModule {}

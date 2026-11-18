@@ -22,7 +22,7 @@ import type { User } from '../generated/prisma/client.js';
 import { CommentsService } from './comments.service.js';
 import { CommentDto } from './comment.dto.js';
 import { MAX_ATTACHMENT_BYTES, type UploadFile } from './comment.rules.js';
-@Controller('repositories/:repoId')
+@Controller(['projects/:repoId', 'repositories/:repoId'])
 @UseGuards(JwtAuthGuard)
 @UseInterceptors(CollaborationChangeInterceptor)
 export class CommentsController {

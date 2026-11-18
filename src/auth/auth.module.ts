@@ -3,7 +3,9 @@ import { ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import type { Env } from '../config/env.js';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard.js';
-import { AuthController } from './auth.controller.js';
+import { ProjectAuthController } from './project-auth.controller.js';
+import { IdentityService } from './identity.service.js';
+import { IdentitiesController } from './identities.controller.js';
 import { AuthService } from './auth.service.js';
 import { SessionService } from './session.service.js';
 import { GithubModule } from '../github/github.module.js';
@@ -20,8 +22,8 @@ import { AvatarFilesController, ProfileController } from './profile.controller.j
       }),
     }),
   ],
-  controllers: [AuthController, ProfileController, AvatarFilesController],
-  providers: [AuthService, SessionService, JwtAuthGuard],
+  controllers: [ProjectAuthController, IdentitiesController, ProfileController, AvatarFilesController],
+  providers: [IdentityService, AuthService, SessionService, JwtAuthGuard],
   exports: [SessionService, JwtAuthGuard],
 })
 export class AuthModule {}

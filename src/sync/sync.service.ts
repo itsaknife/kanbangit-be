@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { AccessService } from '../access/access.service.js';
 import type { Prisma, User } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
@@ -16,7 +16,8 @@ export class SyncService {
   ) {}
 
   async info(user: User, repoId: string, issueId: string) {
-    const { member } = await this.access.requireMember(user, repoId);
+    const { member, connected } = await this.access.requireMember(user, repoId);
+    if(connected.providerType !== 'GITHUB') throw new BadRequestException('Project local không có GitHub Sync');
     const issue = await this.prisma.issue.findFirst({ where: { id: issueId, repoId } });
     if (!issue) throw new NotFoundException('Không tìm thấy issue trong repository');
     const job = await this.prisma.syncJob.findFirst({
@@ -37,7 +38,8 @@ export class SyncService {
   }
 
   async queue(user: User, repoId: string, page: number, limit: number) {
-    await this.access.requireConnectedOwner(user, repoId);
+    const {connected}=await this.access.requireConnectedOwner(user, repoId);
+    if(connected.providerType !== 'GITHUB') throw new BadRequestException('Project local không có GitHub Sync');
     const where: Prisma.IssueWhereInput = { repoId, syncStatus: { not: 'SYNCED' } };
     const [issues, total] = await Promise.all([
       this.prisma.issue.findMany({
@@ -69,7 +71,8 @@ export class SyncService {
   }
 
   async retry(user: User, repoId: string, issueId?: string) {
-    await this.access.requireConnectedOwner(user, repoId);
+    const {connected}=await this.access.requireConnectedOwner(user, repoId);
+    if(connected.providerType !== 'GITHUB') throw new BadRequestException('Project local không có GitHub Sync');
     const rows = await this.access.ownerTransaction(user, repoId, async (tx) => {
       const issues = await tx.issue.findMany({
         where: { repoId, ...(issueId ? { id: issueId } : { syncStatus: 'NEEDS_ATTENTION' }) },

@@ -21,7 +21,7 @@ import { ParentDto } from './dto/planning.dto.js';
 import { IssueListQuery } from './dto/issue-list.dto.js';
 import { IssuesService } from './issues.service.js';
 
-@Controller('repositories/:repoId/issues')
+@Controller(['projects/:repoId/issues', 'repositories/:repoId/issues'])
 @UseGuards(JwtAuthGuard)
 export class IssuesController {
   constructor(private readonly issues: IssuesService) {}

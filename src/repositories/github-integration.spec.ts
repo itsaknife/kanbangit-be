@@ -16,6 +16,7 @@ const repo = {
   githubId: 100n,
   owner: 'owner',
   name: 'app',
+  providerType: 'GITHUB',
   connectedById: '10000000-0000-4000-8000-000000000001',
   importCompleted: true,
 } as Repository;
@@ -23,7 +24,7 @@ const repo = {
 function fixture() {
   const tx = {
     $queryRaw: vi.fn(async () => []),
-    user: { findUnique: vi.fn(async (): Promise<{ id: string } | null> => null) },
+    authIdentity: { findUnique: vi.fn(async (): Promise<{ userId: string } | null> => null) },
     repositoryMember: {
       upsert: vi.fn(
         async (_args: { create: Record<string, unknown>; update: Record<string, unknown> }) => ({}),
@@ -151,11 +152,11 @@ describe('M1 GitHub Integration', () => {
 
   it('links an existing User by GitHub identity rather than username', async () => {
     const f = fixture();
-    f.tx.user.findUnique.mockResolvedValue({ id: '10000000-0000-4000-8000-000000000001' });
+    f.tx.authIdentity.findUnique.mockResolvedValue({ userId: '10000000-0000-4000-8000-000000000001' });
     await f.members.sync(user, repo);
-    expect(f.tx.user.findUnique).toHaveBeenCalledWith({
-      where: { githubId: 2n },
-      select: { id: true },
+    expect(f.tx.authIdentity.findUnique).toHaveBeenCalledWith({
+      where: { provider_providerUserId:{provider:'GITHUB',providerUserId:'2'} },
+      select: { userId: true },
     });
     expect(f.tx.repositoryMember.upsert.mock.calls[0]?.[0]).toMatchObject({
       update: { userId: '10000000-0000-4000-8000-000000000001' },

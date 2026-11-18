@@ -18,7 +18,7 @@ export class SyncQueueQuery {
   @Type(() => Number) @IsInt() @Min(1) page = 1;
   @Type(() => Number) @IsInt() @Min(1) @Max(100) limit = 20;
 }
-@Controller('repositories/:repoId')
+@Controller(['projects/:repoId', 'repositories/:repoId'])
 @UseGuards(JwtAuthGuard)
 export class SyncController {
   constructor(private readonly sync: SyncService) {}

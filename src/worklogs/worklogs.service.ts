@@ -167,11 +167,12 @@ export class WorklogsService {
           throw new ForbiddenException('Bạn chỉ được tạo worklog của mình');
         const targetIssueId = old?.issueId ?? issueId!;
         await this.access.issue(tx, repoId, targetIssueId);
-        await tx.$queryRaw`SELECT pg_advisory_xact_lock(${member.githubUserId})::text`;
+        const personKey = member.userId ?? `github:${member.githubUserId}`;
+        await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${personKey},0))::text`;
         if (
           await tx.worklog.findFirst({
             where: {
-              githubUserId: member.githubUserId,
+              personKey,
               ...(id ? { id: { not: id } } : {}),
               startAt: { lt: timing.endAt },
               endAt: { gt: timing.startAt },
@@ -190,7 +191,7 @@ export class WorklogsService {
                 ...data,
                 issueId: targetIssueId,
                 memberId,
-                githubUserId: member.githubUserId,
+                personKey,
               },
             });
         return { id: row.id, issueId: row.issueId };

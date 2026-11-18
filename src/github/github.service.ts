@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, ForbiddenException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Octokit } from 'octokit';
 import type { Env } from '../config/env.js';
@@ -7,6 +7,7 @@ import { decrypt } from '../common/utils/crypto.js';
 import type { User } from '../generated/prisma/client.js';
 import type { GithubIssue, GithubRepo, GithubMember } from './github.types.js';
 
+import { PrismaService } from '../prisma/prisma.service.js';
 const REPO_CACHE_MS = 60_000;
 
 /** Mọi lời gọi tới GitHub đều đi qua đây, dùng token của chính người dùng đang thao tác. */
@@ -15,13 +16,15 @@ export class GithubService {
   private readonly logger = new Logger(GithubService.name);
   private readonly repoCache = new Map<string, { expiresAt: number; repos: GithubRepo[] }>();
 
-  constructor(private readonly config: ConfigService<Env, true>) {}
+  constructor(private readonly config: ConfigService<Env, true>, private readonly prisma: PrismaService) {}
 
-  client(user: Pick<User, 'accessToken'>): Octokit {
+  async client(user: Pick<User, 'id'>): Promise<Octokit> {
+    const identity=await this.prisma.authIdentity.findUnique({where:{userId_provider:{userId:user.id,provider:'GITHUB'}}});
+    if(!identity?.accessToken) throw new ForbiddenException('Cần liên kết lại GitHub trong Connected Accounts');
     const key = this.config.get('TOKEN_ENCRYPTION_KEY', { infer: true });
     // The durable outbox owns retries, including ambiguous CREATE responses.
     return new Octokit({
-      auth: decrypt(user.accessToken, key),
+      auth: decrypt(identity.accessToken, key),
       request: { timeout: 30000 },
       retry: { enabled: false },
       throttle: { enabled: false },
@@ -30,10 +33,10 @@ export class GithubService {
 
   /** Repository mà người dùng có quyền truy cập (lưu tạm 1 phút để đỡ gọi GitHub liên tục). */
   async listRepos(user: User, forceRefresh = false): Promise<GithubRepo[]> {
+    const octokit = await this.client(user);
     const cached = this.repoCache.get(user.id);
     if (!forceRefresh && cached && cached.expiresAt > Date.now()) return cached.repos;
 
-    const octokit = this.client(user);
     const data = await octokit.paginate(octokit.rest.repos.listForAuthenticatedUser, {
       per_page: 100,
       sort: 'updated',
@@ -59,7 +62,7 @@ export class GithubService {
     user: User,
     input: { name: string; description?: string; visibility: 'PUBLIC' | 'PRIVATE' },
   ): Promise<GithubRepo> {
-    const { data } = await this.client(user).rest.repos.createForAuthenticatedUser({
+    const { data } = await (await this.client(user)).rest.repos.createForAuthenticatedUser({
       name: input.name,
       description: input.description,
       private: input.visibility === 'PRIVATE',
@@ -80,7 +83,7 @@ export class GithubService {
   }
 
   async listMembers(user: User, owner: string, repo: string): Promise<GithubMember[]> {
-    const octokit = this.client(user);
+    const octokit = (await this.client(user));
     const [collaborators, ownerResponse] = await Promise.all([
       octokit.paginate(octokit.rest.repos.listCollaborators, {
         owner,
@@ -121,7 +124,7 @@ export class GithubService {
 
   /** Toàn bộ issue (đang mở và đã đóng) của repository, không gồm Pull Request. */
   async listIssues(user: User, owner: string, repo: string): Promise<GithubIssue[]> {
-    const octokit = this.client(user);
+    const octokit = (await this.client(user));
     const data = await octokit.paginate(octokit.rest.issues.listForRepo, {
       owner,
       repo,
@@ -137,16 +140,16 @@ export class GithubService {
     repo: string,
     payload: { title: string; body?: string; labels?: string[]; assignees?: string[] },
   ): Promise<GithubIssue> {
-    const { data } = await this.client(user).rest.issues.create({ owner, repo, ...payload });
+    const { data } = await (await this.client(user)).rest.issues.create({ owner, repo, ...payload });
     return data;
   }
 
   async getIssue(user: User, owner: string, repo: string, number: number): Promise<GithubIssue> {
-    return (await this.client(user).rest.issues.get({ owner, repo, issue_number: number })).data;
+    return (await (await this.client(user)).rest.issues.get({ owner, repo, issue_number: number })).data;
   }
 
   async requireWrite(user: User, owner: string, repo: string) {
-    const { data } = await this.client(user).rest.repos.get({ owner, repo });
+    const { data } = await (await this.client(user)).rest.repos.get({ owner, repo });
     if (!data.permissions?.push && !data.permissions?.admin && !data.permissions?.maintain)
       throw Object.assign(new Error('GitHub write permission required'), { status: 403 });
   }
@@ -159,7 +162,7 @@ export class GithubService {
   ): Promise<GithubIssue | null> {
     try {
       return (
-        await this.client(user).request('GET /repos/{owner}/{repo}/issues/{issue_number}/parent', {
+        await (await this.client(user)).request('GET /repos/{owner}/{repo}/issues/{issue_number}/parent', {
           owner,
           repo,
           issue_number: issueNumber,
@@ -181,12 +184,12 @@ export class GithubService {
     const previous = await this.getParent(user, owner, repo, child.number);
     if ((previous?.number ?? null) === parentNumber) return;
     if (previous)
-      await this.client(user).request(
+      await (await this.client(user)).request(
         'DELETE /repos/{owner}/{repo}/issues/{issue_number}/sub_issue',
         { owner, repo, issue_number: previous.number, sub_issue_id: child.id },
       );
     if (parentNumber !== null)
-      await this.client(user).request(
+      await (await this.client(user)).request(
         'POST /repos/{owner}/{repo}/issues/{issue_number}/sub_issues',
         { owner, repo, issue_number: parentNumber, sub_issue_id: child.id },
       );
@@ -206,7 +209,7 @@ export class GithubService {
       state_reason?: 'completed' | 'reopened';
     },
   ): Promise<GithubIssue> {
-    const { data } = await this.client(user).rest.issues.update({
+    const { data } = await (await this.client(user)).rest.issues.update({
       owner,
       repo,
       issue_number: issueNumber,
@@ -221,7 +224,7 @@ export class GithubService {
     owner: string,
     repo: string,
   ): Promise<Array<{ login: string; avatarUrl: string }>> {
-    const octokit = this.client(user);
+    const octokit = (await this.client(user));
     const users = await octokit.paginate(octokit.rest.issues.listAssignees, {
       owner,
       repo,
@@ -232,7 +235,7 @@ export class GithubService {
 
   /** Tạo các nhãn chuẩn (bug, enhancement, task) và nhãn "in progress" nếu repository chưa có. */
   async ensureLabels(user: User, owner: string, repo: string): Promise<void> {
-    const octokit = this.client(user);
+    const octokit = (await this.client(user));
     const existing = await octokit.paginate(octokit.rest.issues.listLabelsForRepo, {
       owner,
       repo,
@@ -249,7 +252,7 @@ export class GithubService {
 
   /** Đăng ký webhook nhận sự kiện issue. Nếu đã có webhook cùng địa chỉ thì dùng lại. */
   async ensureWebhook(user: User, owner: string, repo: string): Promise<number> {
-    const octokit = this.client(user);
+    const octokit = (await this.client(user));
     const url = this.config.get('WEBHOOK_URL', { infer: true });
     const hooks = await octokit.paginate(octokit.rest.repos.listWebhooks, {
       owner,

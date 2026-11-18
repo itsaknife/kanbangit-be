@@ -17,7 +17,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard.js';
 import type { User } from '../generated/prisma/client.js';
 import { CreateWorklogDto, UpdateWorklogDto, WorklogQuery } from './worklog.dto.js';
 import { WorklogsService } from './worklogs.service.js';
-@Controller('repositories/:repoId')
+@Controller(['projects/:repoId', 'repositories/:repoId'])
 @UseGuards(JwtAuthGuard)
 @UseInterceptors(CollaborationChangeInterceptor)
 export class WorklogsController {

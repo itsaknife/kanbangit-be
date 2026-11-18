@@ -10,18 +10,16 @@ export class MembersService {
     private readonly prisma: PrismaService,
     private readonly github: GithubService,
     private readonly realtime: RealtimeGateway,
-  ) {}
+  ) { }
 
   async sync(user: User, repository: Repository) {
     // Complete GitHub pagination before changing active flags: API failure preserves membership.
-    const members = await this.github.listMembers(user, repository.owner, repository.name);
+    const members = await this.github.listMembers(user, repository.owner!, repository.name);
     await this.prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM "Repository" WHERE id=${repository.id} FOR UPDATE`;
       for (const member of members) {
-        const linked = await tx.user.findUnique({
-          where: { githubId: member.githubUserId },
-          select: { id: true },
-        });
+        const identity = await tx.authIdentity.findUnique({ where: { provider_providerUserId: { provider: 'GITHUB', providerUserId: String(member.githubUserId) } }, select: { userId: true } });
+        const linked = identity ? { id: identity.userId } : null;
         const data = { ...member, userId: linked?.id ?? null, isActive: true };
         await tx.repositoryMember.upsert({
           where: {
@@ -56,6 +54,6 @@ export class MembersService {
       where: { repositoryId },
       orderBy: [{ role: 'asc' }, { login: 'asc' }],
     });
-    return members.map((member) => ({ ...member, githubUserId: member.githubUserId.toString() }));
+    return members.map((member) => ({ ...member, githubUserId: member.githubUserId?.toString() ?? null }));
   }
 }

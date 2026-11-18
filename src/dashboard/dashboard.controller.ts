@@ -11,7 +11,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard.js';
 import type { User } from '../generated/prisma/client.js';
 import { DashboardService } from './dashboard.service.js';
 
-@Controller('repositories/:repoId/dashboard')
+@Controller(['projects/:repoId/dashboard', 'repositories/:repoId/dashboard'])
 @UseGuards(JwtAuthGuard)
 export class DashboardController {
   constructor(private readonly dashboard: DashboardService) {}

@@ -64,7 +64,7 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   async me(@CurrentUser() user: User) {
     try {
-      await this.github.client(user).rest.users.getAuthenticated({ request: { timeout: 10000 } });
+      await (await this.github.client(user)).rest.users.getAuthenticated({ request: { timeout: 10000 } });
     } catch (error) {
       // Revoked credentials end the session; a GitHub outage must not block local work.
       if (!(error instanceof RequestError) || error.status === 401) throw error;
